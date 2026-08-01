@@ -354,9 +354,29 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0170(t *testing.T) {
-	if version != "0.17.0" {
-		t.Fatalf("expected version 0.17.0, got %s", version)
+func TestVersionIs0171(t *testing.T) {
+	if version != "0.17.1" {
+		t.Fatalf("expected version 0.17.1, got %s", version)
+	}
+}
+
+// A packaged build must never self-update: it would overwrite the binary the
+// package manager owns. Only the default "direct" channel may update in place.
+func TestPackageUpdateHintPerChannel(t *testing.T) {
+	for channel, want := range map[string]string{
+		"homebrew": "brew upgrade cdnctl",
+		"deb":      "apt-get install --only-upgrade cdnctl",
+		"rpm":      "dnf upgrade cdnctl",
+	} {
+		if got := packageUpdateHint(channel); !strings.Contains(got, want) {
+			t.Fatalf("channel %s: expected hint to contain %q, got %q", channel, want, got)
+		}
+	}
+}
+
+func TestInstallChannelDefaultsToDirect(t *testing.T) {
+	if installChannel != "direct" {
+		t.Fatalf("unstamped builds must self-update; got channel %q", installChannel)
 	}
 }
 
