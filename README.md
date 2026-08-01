@@ -147,7 +147,7 @@ opening a public issue.
 ## Links
 
 - Website — <https://cdn.com.tr>
-- CLI docs & downloads — <https://cdn.com.tr/tools/cdnctl>
+- CLI docs & downloads — <https://cdn.com.tr/en/platform-help/tools/cdnctl>
 - Help center — <https://cdn.com.tr/help>
 
 ## License
