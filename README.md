@@ -18,6 +18,41 @@ needed. It is written in Go using only the standard library.
 
 ## Install
 
+**Homebrew** (macOS and Linux):
+
+```bash
+brew install mediatriple/tap/cdnctl
+```
+
+**Debian / Ubuntu** — signed APT repository:
+
+```bash
+curl -fsSL https://cdn.com.tr/downloads/cdn-com-tr.gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/cdn-com-tr.gpg
+echo "deb [signed-by=/usr/share/keyrings/cdn-com-tr.gpg] https://cdn.com.tr/downloads/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/cdn-com-tr.list
+sudo apt-get update && sudo apt-get install cdnctl
+```
+
+**RHEL / Fedora / Rocky** — signed YUM repository:
+
+```bash
+sudo tee /etc/yum.repos.d/cdn-com-tr.repo >/dev/null <<'EOF'
+[cdn-com-tr]
+name=cdn.com.tr
+baseurl=https://cdn.com.tr/downloads/rpm
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://cdn.com.tr/downloads/cdn-com-tr.gpg
+EOF
+sudo dnf install cdnctl
+```
+
+Installed this way, cdnctl upgrades with your package manager (`brew upgrade cdnctl`,
+`apt-get install --only-upgrade cdnctl`, `dnf upgrade cdnctl`); `cdnctl update` steps aside
+rather than overwriting a file the package manager owns.
+
 **With Go:**
 
 ```bash
