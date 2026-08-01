@@ -25,6 +25,12 @@ import (
 
 var version = "0.17.0"
 
+// installChannel records how this binary was distributed. Direct downloads and
+// `go install` builds keep the default and may self-update; builds packaged for
+// a package manager are stamped (e.g. -X main.installChannel=homebrew) so
+// `cdnctl update` refuses instead of fighting dpkg/rpm/brew over the same file.
+var installChannel = "direct"
+
 type config struct {
 	Endpoint string `json:"endpoint"`
 	Token    string `json:"token"`
@@ -422,6 +428,18 @@ type releaseTarget struct {
 }
 
 func cmdUpdate(args parsedArgs) error {
+	// Self-update would overwrite a file the package manager owns, leaving its
+	// database pointing at a version that is no longer on disk. Let the package
+	// manager do the upgrade instead.
+	if installChannel != "direct" {
+		return printJSON(map[string]any{
+			"status":          false,
+			"message":         packageUpdateHint(installChannel),
+			"current_version": version,
+			"install_channel": installChannel,
+		})
+	}
+
 	baseURL := strings.TrimRight(option(args, "base_url", os.Getenv("CDNCTL_BASE_URL")), "/")
 	if baseURL == "" {
 		baseURL = "https://cdn.com.tr/downloads/cdnctl"
@@ -603,6 +621,21 @@ func updateBinary(baseURL string, target releaseTarget, requestedBinDir string) 
 		return "", err
 	}
 	return installPath, nil
+}
+
+// packageUpdateHint tells the operator which command actually upgrades a
+// package-managed install.
+func packageUpdateHint(channel string) string {
+	switch channel {
+	case "homebrew":
+		return "This cdnctl was installed with Homebrew. Update it with: brew update && brew upgrade cdnctl"
+	case "deb":
+		return "This cdnctl was installed from a .deb package. Update it with: sudo apt-get update && sudo apt-get install --only-upgrade cdnctl"
+	case "rpm":
+		return "This cdnctl was installed from an .rpm package. Update it with: sudo dnf upgrade cdnctl"
+	default:
+		return fmt.Sprintf("This cdnctl was installed via %s; use that package manager to upgrade it.", channel)
+	}
 }
 
 func updateInstallPath(requestedBinDir string) string {
