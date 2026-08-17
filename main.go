@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.17.1"
+var version = "0.17.2"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -933,7 +933,7 @@ func cmdCp(args parsedArgs) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(response)
+	return printFileResponse(response)
 }
 
 // cpUploadFile uploads a single local file to accounts/<uuid>/files/put.
@@ -953,6 +953,7 @@ func cpRecursive(account, localDir, remoteBase string, force bool) error {
 	localDir = filepath.Clean(localDir)
 	remoteBase = strings.TrimRight(remoteBase, "/")
 	uploaded, failed := 0, 0
+	storageFullErr := errors.New("remote persistent storage is full")
 	walkErr := filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -979,14 +980,35 @@ func cpRecursive(account, localDir, remoteBase string, force bool) error {
 				msg = " — " + m
 			}
 			fmt.Fprintf(os.Stderr, "  FAILED    %s%s\n", target, msg)
+			if responseStorageFull(resp) {
+				return storageFullErr
+			}
 		}
 		return nil
 	})
+	if errors.Is(walkErr, storageFullErr) {
+		fmt.Fprintln(os.Stderr)
+		_ = printJSON(map[string]any{
+			"status":     false,
+			"uploaded":   uploaded,
+			"failed":     failed,
+			"aborted":    true,
+			"error_code": "storage_full",
+			"message":    "Persistent storage is full; recursive upload stopped before creating more failed targets.",
+		})
+		return errExit(1)
+	}
 	if walkErr != nil {
 		return walkErr
 	}
 	fmt.Fprintln(os.Stderr)
-	return printJSON(map[string]any{"status": failed == 0, "uploaded": uploaded, "failed": failed})
+	if err := printJSON(map[string]any{"status": failed == 0, "uploaded": uploaded, "failed": failed}); err != nil {
+		return err
+	}
+	if failed > 0 {
+		return errExit(1)
+	}
+	return nil
 }
 
 // responseOK reads the {status: bool|string} envelope returned by the file API.
@@ -998,6 +1020,41 @@ func responseOK(resp map[string]any) bool {
 		return v == "success" || v == "true"
 	}
 	return false
+}
+
+func responseStorageFull(resp map[string]any) bool {
+	if strings.EqualFold(strval(resp["error_code"]), "storage_full") {
+		return true
+	}
+
+	for _, key := range []string{"_http_status", "http_status"} {
+		switch value := resp[key].(type) {
+		case float64:
+			if int(value) == http.StatusInsufficientStorage {
+				return true
+			}
+		case int:
+			if value == http.StatusInsufficientStorage {
+				return true
+			}
+		case string:
+			if value == strconv.Itoa(http.StatusInsufficientStorage) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func printFileResponse(response map[string]any) error {
+	if err := printJSON(response); err != nil {
+		return err
+	}
+	if !responseOK(response) {
+		return errExit(1)
+	}
+	return nil
 }
 
 func cmdFiles(args parsedArgs) error {
@@ -1021,7 +1078,7 @@ func cmdFiles(args parsedArgs) error {
 		if err != nil {
 			return err
 		}
-		return printJSON(response)
+		return printFileResponse(response)
 	case "ls":
 		return printRequest(http.MethodPost, fmt.Sprintf("accounts/%s/files/list", account), map[string]any{
 			"path": option(args, "path", ""),

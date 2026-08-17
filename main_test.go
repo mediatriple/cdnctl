@@ -354,9 +354,62 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0171(t *testing.T) {
-	if version != "0.17.1" {
-		t.Fatalf("expected version 0.17.1, got %s", version)
+func TestVersionIs0172(t *testing.T) {
+	if version != "0.17.2" {
+		t.Fatalf("expected version 0.17.2, got %s", version)
+	}
+}
+
+func TestResponseStorageFullRecognizesStructuredCodeAndHTTP507(t *testing.T) {
+	for _, response := range []map[string]any{
+		{"status": false, "error_code": "storage_full"},
+		{"status": false, "_http_status": float64(http.StatusInsufficientStorage)},
+		{"status": false, "http_status": "507"},
+	} {
+		if !responseStorageFull(response) {
+			t.Fatalf("expected storage-full response to be recognized: %#v", response)
+		}
+	}
+}
+
+func TestPrintFileResponseReturnsNonZeroForFailedAPIEnvelope(t *testing.T) {
+	err := printFileResponse(map[string]any{"status": false, "error_code": "upload_failed"})
+	exit, ok := isExitError(err)
+	if !ok || exit.code != 1 {
+		t.Fatalf("expected exit code 1, got %#v", err)
+	}
+}
+
+func TestRecursiveCopyStopsAfterFirstStorageFullResponse(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInsufficientStorage)
+		_, _ = io.WriteString(w, `{"status":false,"error_code":"storage_full","message":"Persistent storage is full."}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("CDN_ENDPOINT", server.URL)
+	t.Setenv("CDN_ACCESS_TOKEN", "test-token")
+	t.Setenv("CDNCTL_ENDPOINT", "")
+	t.Setenv("CDNCTL_TOKEN", "")
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "first.txt"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "second.txt"), []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cpRecursive("account", dir, "uploads", true)
+	exit, ok := isExitError(err)
+	if !ok || exit.code != 1 {
+		t.Fatalf("expected exit code 1, got %#v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected fail-fast after one request, got %d requests", requests)
 	}
 }
 
