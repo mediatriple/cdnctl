@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.17.2"
+var version = "0.17.3"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -183,6 +183,9 @@ Usage:
   cdnctl object-storage bindings delete --account <uuid> --app <app_uuid> --binding <binding_uuid> --yes
   cdnctl purge --account <uuid> --path /sitemap.xml [--path /other] [--type exact|prefix|variants] [--save]
   cdnctl purge --account <uuid> --paths "/a,/b,/c" [--type prefix]
+      --type exact     (default) just that URL
+      --type prefix    that path and everything under it
+      --type variants  every stored variant of the cache key
   cdnctl purge all --account <uuid> --yes
   cdnctl purge all status --account <uuid>
 
@@ -1135,7 +1138,13 @@ func cmdPurge(args parsedArgs) error {
 	payload := map[string]any{
 		"paths": paths,
 		// exact = single URL, prefix = everything under the path (wildcard),
-		// variants = all cache variants (mobile/desktop) of the key.
+		// variants = every stored variant of the cache key.
+		//
+		// NOT mobile/desktop: that dimension is gone. The edge cache key is
+		// $scheme$host$uri$is_args$args — no device component — and the
+		// $is_mobile map still emitted into each generated config is dead
+		// leftover. The old comment here described a scheme that no longer
+		// exists and sent people looking for a device split that cannot occur.
 		"type": option(args, "type", "exact"),
 		"save": args.Bools["save"],
 	}
