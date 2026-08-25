@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.17.3"
+var version = "0.18.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -98,6 +98,16 @@ func run(args []string) error {
 		return cmdObjectStorage(parsed)
 	case "purge":
 		return cmdPurge(parsed)
+	case "init":
+		return cmdInit(parsed)
+	case "check":
+		return cmdCheck(parsed)
+	case "deploy":
+		return cmdDeploy(parsed)
+	case "mcp":
+		return cmdMcp(parsed)
+	case "deploy-token":
+		return cmdDeployToken(parsed)
 	default:
 		usage(os.Stderr)
 		return errExit(2)
@@ -181,6 +191,26 @@ Usage:
   cdnctl object-storage access-keys revoke --account <uuid> --key <key_uuid> --yes
   cdnctl object-storage bindings create --account <uuid> --app <app_uuid> --bucket <bucket_uuid> --access-key <key_uuid> --env-prefix S3
   cdnctl object-storage bindings delete --account <uuid> --app <app_uuid> --binding <binding_uuid> --yes
+  cdnctl init [--dir .] [--json] [--dry-run] [--method auto|git|compose|source] [--no-agent-bridge] [--wait]
+                (--wait: paket eksikse satin alma URL'ini gosterir ve odeme panelde
+                 bitince OTOMATIK devam eder — 30 dk yoklama, 15 sn aralikla)
+                (projeyi tanır, lokal AI agent'ları bulur ve AGENTS.md/CLAUDE.md'ye deploy
+                 talimatı yazar, cdnctl.yaml üretir; eksik paket varsa satın alma URL'i verir —
+                 ödeme tarayıcıda biter, init yeniden çalıştırılınca kaldığı yerden sürer)
+  cdnctl deploy [--dir .] [--account <uuid>] [--name <app>] [--dockerfile Dockerfile] [--app <app_uuid>] [--skip-checks]
+                (kaynagi tar'lar, yukler, platformda Kaniko ile build eder, uygulamayi
+                 yeni imaja cevirir — yoksa olusturur+expose eder; git/registry GEREKMEZ)
+  cdnctl deploy-token create [--account <uuid>] [--name "agent"]   (duz metin BIR KEZ gosterilir)
+  cdnctl deploy-token list [--account <uuid>]
+  cdnctl deploy-token revoke --id <token_id> [--account <uuid>]
+                (deploy-only kapsam: kaynak yukle/build + uygulama yasam dongusu.
+                 Agent'a bu token verilir: cdnctl configure --token cdnctl_...  —
+                 panel/DNS/faturalamaya ASLA uzanamaz)
+  cdnctl mcp    (cdnctl'i MCP sunucusu yapar: lokal AI agent'lar deploy/check/status
+                 araclarini dogrudan kullanir — stdio, Claude Code/Cursor uyumlu)
+  cdnctl check [--dir .] [--json]
+                (deploy ÖNCESİ lokal karne: localhost bind, kodda secret, SQLite,
+                 healthcheck eksikliği... hata varsa exit 1 — kod makineden çıkmaz)
   cdnctl purge --account <uuid> --path /sitemap.xml [--path /other] [--type exact|prefix|variants] [--save]
   cdnctl purge --account <uuid> --paths "/a,/b,/c" [--type prefix]
       --type exact     (default) just that URL
@@ -1934,7 +1964,15 @@ func homeDir() string {
 }
 
 func endpoint(cfg config, path string) string {
-	return strings.TrimRight(cfg.Endpoint, "/") + "/api/" + strings.TrimLeft(path, "/")
+	p := strings.TrimLeft(path, "/")
+	// Deploy-only token (cdnctl_…) yalnız /deploy-token yüzeyinde geçerlidir; aynı
+	// komutlar tam-yetkili oturumla da çalışsın diye yönlendirme burada, şeffafça
+	// yapılır. Kapsam dışı bir accounts/ ucu token'la 404 döner — bilerek: token
+	// deploy dışında hiçbir şeye uzanamaz.
+	if strings.HasPrefix(cfg.Token, "cdnctl_") && strings.HasPrefix(p, "accounts/") {
+		p = "deploy-token/" + p
+	}
+	return strings.TrimRight(cfg.Endpoint, "/") + "/api/" + p
 }
 
 func required(args parsedArgs, key string) string {
