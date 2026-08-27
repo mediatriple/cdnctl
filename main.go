@@ -23,12 +23,13 @@ import (
 	"time"
 )
 
-var version = "0.18.0"
+var version = "0.18.1"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
 // a package manager are stamped (e.g. -X main.installChannel=homebrew) so
-// `cdnctl update` refuses instead of fighting dpkg/rpm/brew over the same file.
+// `cdnctl update` routes the upgrade through that manager instead of fighting
+// dpkg/rpm/brew over the same file — it still reports the version gap either way.
 var installChannel = "direct"
 
 type config struct {
@@ -109,6 +110,11 @@ func run(args []string) error {
 	case "deploy-token":
 		return cmdDeployToken(parsed)
 	default:
+		// Naming the command matters: printing the bare usage banner looks
+		// identical to "that command does not exist", which is how someone on
+		// an old build reads a missing `init`.
+		fmt.Fprintf(os.Stderr, "cdnctl: unknown command %q\n", command)
+		fmt.Fprintf(os.Stderr, "If you expected this command, this build may be too old (installed: %s). Check with: cdnctl update --check\n\n", version)
 		usage(os.Stderr)
 		return errExit(2)
 	}
@@ -124,6 +130,8 @@ Usage:
   cdnctl logout                     (forget the saved token, default account, and email; keeps the endpoint)
   cdnctl update --check
   cdnctl update [--yes] [--version 0.1.2] [--bin-dir "$HOME/.local/bin"] [--allow-downgrade]
+                (Homebrew/apt/rpm installs: reports the version gap and the upgrade
+                 command; with --yes on Homebrew cdnctl runs brew upgrade itself)
                 (refuses to move to an older published version unless --allow-downgrade is given)
   cdnctl configure --endpoint https://cdn.com.tr --token <token>
   cdnctl accounts list              (full JSON for every account)
@@ -461,18 +469,6 @@ type releaseTarget struct {
 }
 
 func cmdUpdate(args parsedArgs) error {
-	// Self-update would overwrite a file the package manager owns, leaving its
-	// database pointing at a version that is no longer on disk. Let the package
-	// manager do the upgrade instead.
-	if installChannel != "direct" {
-		return printJSON(map[string]any{
-			"status":          false,
-			"message":         packageUpdateHint(installChannel),
-			"current_version": version,
-			"install_channel": installChannel,
-		})
-	}
-
 	baseURL := strings.TrimRight(option(args, "base_url", os.Getenv("CDNCTL_BASE_URL")), "/")
 	if baseURL == "" {
 		baseURL = "https://cdn.com.tr/downloads/cdnctl"
@@ -508,6 +504,16 @@ func cmdUpdate(args parsedArgs) error {
 			"update_available": cmp < 0,
 			"is_downgrade":     cmp > 0,
 		})
+	}
+
+	// A package manager owns this binary. Writing over it ourselves would leave
+	// the package database pointing at a version that is no longer on disk, so
+	// the upgrade has to go through that manager — but "update" should still
+	// mean update: where it can be done without privilege escalation (Homebrew)
+	// we run it, and everywhere else we report the exact command plus the
+	// version gap, so nobody has to guess whether they are behind.
+	if installChannel != "direct" {
+		return updateViaPackageManager(installChannel, target.Version, cmp, args.Bools["yes"])
 	}
 
 	if cmp == 0 {
@@ -654,6 +660,110 @@ func updateBinary(baseURL string, target releaseTarget, requestedBinDir string) 
 		return "", err
 	}
 	return installPath, nil
+}
+
+// packageUpgradeCommand is the command that actually upgrades a
+// package-managed install, and whether we can run it ourselves. Commands that
+// need root are reported rather than executed: cdnctl never escalates
+// privileges on its own.
+func packageUpgradeCommand(channel string) (cmd []string, runnable bool) {
+	switch channel {
+	case "homebrew":
+		return []string{"brew", "upgrade", "cdnctl"}, true
+	case "deb":
+		return []string{"sudo", "apt-get", "update", "&&", "sudo", "apt-get", "install", "--only-upgrade", "cdnctl"}, false
+	case "rpm":
+		return []string{"sudo", "dnf", "upgrade", "cdnctl"}, false
+	case "docker":
+		return []string{"docker", "pull", "cdncomtr/cdnctl:latest"}, false
+	}
+	return nil, false
+}
+
+// updateViaPackageManager handles `cdnctl update` for a binary owned by a
+// package manager. It always reports current vs latest — the old behaviour
+// returned "status": false with no version information at all, which reads as
+// "nothing to do" to someone who is in fact several releases behind.
+func updateViaPackageManager(channel, latest string, cmp int, assumeYes bool) error {
+	cmdParts, runnable := packageUpgradeCommand(channel)
+	cmdText := strings.Join(cmdParts, " ")
+	if channel == "homebrew" {
+		cmdText = "brew update && brew upgrade cdnctl"
+	}
+
+	if cmp >= 0 {
+		message := "cdnctl is already current"
+		if cmp > 0 {
+			message = fmt.Sprintf("Installed cdnctl (%s) is newer than the published version (%s).", version, latest)
+		}
+		return printJSON(map[string]any{
+			"status":           true,
+			"message":          message,
+			"current_version":  version,
+			"latest_version":   latest,
+			"update_available": false,
+			"install_channel":  channel,
+		})
+	}
+
+	if !runnable || !assumeYes {
+		message := fmt.Sprintf("Update available: %s → %s. This cdnctl was installed with %s, so the upgrade runs through it: %s", version, latest, channelLabel(channel), cmdText)
+		if runnable {
+			message += " (or re-run with --yes and cdnctl will run it for you)"
+		}
+		return printJSON(map[string]any{
+			"status":           true,
+			"message":          message,
+			"current_version":  version,
+			"latest_version":   latest,
+			"update_available": true,
+			"install_channel":  channel,
+			"upgrade_command":  cmdText,
+		})
+	}
+
+	// Run the package manager for the user. Its own output goes straight to the
+	// terminal: a brew upgrade can take a while and silence looks like a hang.
+	fmt.Fprintf(os.Stderr, "cdnctl %s → %s — running: %s\n", version, latest, cmdText)
+	steps := [][]string{{"brew", "update"}, cmdParts}
+	for _, step := range steps {
+		run := exec.Command(step[0], step[1:]...)
+		run.Stdout = os.Stderr
+		run.Stderr = os.Stderr
+		if err := run.Run(); err != nil {
+			_ = printJSON(map[string]any{
+				"status":          false,
+				"message":         fmt.Sprintf("%s failed. Run it yourself to see why: %s", strings.Join(step, " "), cmdText),
+				"current_version": version,
+				"latest_version":  latest,
+				"install_channel": channel,
+				"upgrade_command": cmdText,
+			})
+			return errExit(1)
+		}
+	}
+	return printJSON(map[string]any{
+		"status":           true,
+		"message":          fmt.Sprintf("cdnctl upgraded through %s. Run `cdnctl version` to confirm.", channelLabel(channel)),
+		"previous_version": version,
+		"latest_version":   latest,
+		"install_channel":  channel,
+	})
+}
+
+// channelLabel is the human name of an install channel.
+func channelLabel(channel string) string {
+	switch channel {
+	case "homebrew":
+		return "Homebrew"
+	case "deb":
+		return "a .deb package"
+	case "rpm":
+		return "an .rpm package"
+	case "docker":
+		return "Docker"
+	}
+	return channel
 }
 
 // packageUpdateHint tells the operator which command actually upgrades a
@@ -1880,8 +1990,23 @@ func printRequest(method, path string, payload map[string]any) error {
 	return printJSON(response)
 }
 
+// marshalIndentNoHTMLEscape renders JSON for a terminal, not a browser. The
+// default encoder escapes &, < and > into \u0026-style sequences, which turned
+// a copy-pasteable hint ("brew update && brew upgrade cdnctl") into something
+// nobody can read or paste. Nothing we print is interpolated into HTML.
+func marshalIndentNoHTMLEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
 func printJSON(payload map[string]any) error {
-	data, err := json.MarshalIndent(payload, "", "  ")
+	data, err := marshalIndentNoHTMLEscape(payload)
 	if err != nil {
 		return err
 	}
@@ -1933,7 +2058,7 @@ func writeConfig(cfg config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := marshalIndentNoHTMLEscape(cfg)
 	if err != nil {
 		return err
 	}

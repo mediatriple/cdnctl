@@ -354,9 +354,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0180(t *testing.T) {
-	if version != "0.18.0" {
-		t.Fatalf("expected version 0.18.0, got %s", version)
+func TestVersionIs0181(t *testing.T) {
+	if version != "0.18.1" {
+		t.Fatalf("expected version 0.18.1, got %s", version)
 	}
 }
 
@@ -939,5 +939,89 @@ func TestUpdateSecretFlagsSendSecretsAndUnset(t *testing.T) {
 	unset, _ := captured["unset_secrets"].([]any)
 	if len(unset) != 1 || unset[0] != "OLD_TOKEN" {
 		t.Fatalf("unexpected unset_secrets payload: %#v", captured["unset_secrets"])
+	}
+}
+
+// A package-managed install must still report the version gap. The old
+// behaviour returned status:false with no version fields at all, which reads
+// as "nothing to do" to someone several releases behind — that is exactly how
+// a 0.17.2 Homebrew user ended up running `cdnctl init` on a build that had no
+// init command.
+func TestUpdateViaPackageManagerReportsVersionGap(t *testing.T) {
+	out, err := captureStdout(func() error {
+		return updateViaPackageManager("homebrew", "0.18.0", -1, false)
+	})
+	if err != nil {
+		t.Fatalf("updateViaPackageManager: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v (%s)", err, out)
+	}
+	if payload["update_available"] != true {
+		t.Errorf("update_available = %v, want true", payload["update_available"])
+	}
+	if payload["latest_version"] != "0.18.0" {
+		t.Errorf("latest_version = %v, want 0.18.0", payload["latest_version"])
+	}
+	if payload["current_version"] == nil {
+		t.Error("current_version missing — the caller cannot see how far behind they are")
+	}
+	if cmd, _ := payload["upgrade_command"].(string); !strings.Contains(cmd, "brew upgrade cdnctl") {
+		t.Errorf("upgrade_command = %q, want the brew command", cmd)
+	}
+}
+
+// Being current must not be reported as an available update.
+func TestUpdateViaPackageManagerCurrentIsNotAnUpdate(t *testing.T) {
+	out, err := captureStdout(func() error {
+		return updateViaPackageManager("deb", version, 0, false)
+	})
+	if err != nil {
+		t.Fatalf("updateViaPackageManager: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v (%s)", err, out)
+	}
+	if payload["update_available"] != false {
+		t.Errorf("update_available = %v, want false", payload["update_available"])
+	}
+}
+
+// apt/dnf need root, so cdnctl reports the command instead of running it:
+// the CLI never escalates privileges on its own.
+func TestPackageUpgradeCommandNeverAutoRunsSudo(t *testing.T) {
+	for _, channel := range []string{"deb", "rpm"} {
+		cmd, runnable := packageUpgradeCommand(channel)
+		if runnable {
+			t.Errorf("%s: runnable = true, want false (would escalate privileges)", channel)
+		}
+		if len(cmd) == 0 || cmd[0] != "sudo" {
+			t.Errorf("%s: command = %v, want a sudo command to show the user", channel, cmd)
+		}
+	}
+	if _, runnable := packageUpgradeCommand("homebrew"); !runnable {
+		t.Error("homebrew: runnable = false, want true (no privilege escalation needed)")
+	}
+}
+
+// JSON output goes to a terminal, so & < > must appear literally. Go's default
+// encoder escapes them for HTML embedding, which is how the Homebrew hint
+// reached users as "brew update \u0026\u0026 brew upgrade cdnctl" — unreadable
+// and impossible to paste.
+func TestPrintedJSONDoesNotHTMLEscape(t *testing.T) {
+	out, err := captureStdout(func() error {
+		return printJSON(map[string]any{"message": "brew update && brew upgrade cdnctl <ok>"})
+	})
+	if err != nil {
+		t.Fatalf("printJSON: %v", err)
+	}
+	if strings.Contains(out, "\\u0026") || strings.Contains(out, "\\u003c") {
+		t.Errorf("output contains HTML escapes: %s", out)
+	}
+	if !strings.Contains(out, "brew update && brew upgrade cdnctl") {
+		t.Errorf("literal && missing from output: %s", out)
 	}
 }
