@@ -12,6 +12,7 @@ package main
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -28,6 +29,45 @@ import (
 var deployExcludes = map[string]bool{
 	".git": true, "node_modules": true, ".venv": true, "venv": true,
 	"__pycache__": true, "dist": true, ".next": true, "vendor": true,
+}
+
+// confirmOverwrite guards a deploy that matched an existing app only by name.
+// It shows what would be replaced — including whether it is currently serving
+// traffic — and requires a typed yes. With no terminal to ask (an agent, CI),
+// it refuses rather than assuming: --yes is how intent is stated there.
+func confirmOverwrite(account, appUUID, name string) error {
+	detail, _ := requestJSON(http.MethodGet,
+		fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID), nil)
+
+	domain := findString(detail, "domain")
+	image := findString(detail, "image")
+
+	fmt.Fprintf(os.Stderr, "\nBu hesapta \"%s\" adında bir uygulama zaten var:\n", name)
+	fmt.Fprintf(os.Stderr, "  id     : %s\n", appUUID)
+	if domain != "" {
+		fmt.Fprintf(os.Stderr, "  adres  : https://%s\n", domain)
+	}
+	if image != "" {
+		fmt.Fprintf(os.Stderr, "  imaj   : %s\n", image)
+	}
+	fmt.Fprintln(os.Stderr, "Devam ederseniz bu uygulama yeni imajınızla DEĞİŞTİRİLİR.")
+
+	stat, err := os.Stdin.Stat()
+	interactive := err == nil && (stat.Mode()&os.ModeCharDevice) != 0
+	if !interactive {
+		fmt.Fprintln(os.Stderr, "Onay alınamıyor (terminal yok). Bilerek üzerine yazmak için: --yes")
+		fmt.Fprintln(os.Stderr, "Ayrı bir uygulama istiyorsanız: --name <baska-ad>")
+		return errExit(1)
+	}
+
+	fmt.Fprint(os.Stderr, "Üzerine yazılsın mı? (evet/hayır): ")
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "evet" && answer != "e" && answer != "yes" && answer != "y" {
+		fmt.Fprintln(os.Stderr, "İptal edildi. Ayrı bir uygulama için: --name <baska-ad>")
+		return errExit(1)
+	}
+	return nil
 }
 
 func makeSourceArchive(dir, dockerfile string) (string, int64, error) {
@@ -127,7 +167,20 @@ func cmdDeploy(args parsedArgs) error {
 	dir := option(args, "dir", ".")
 	account := requiredAccount(args)
 	project := detectProject(dir)
-	name := option(args, "name", project.Name)
+	// Precedence: an explicit flag, then cdnctl.yaml, then detection. The
+	// manifest calls itself the file "cdnctl deploy reads" and deploy did not
+	// read it — so editing `name:` did nothing and the folder name silently won,
+	// which is also how a rename of the folder would have created a second app.
+	name := option(args, "name", "")
+	if name == "" {
+		name = readManifestValue(dir, "name")
+	}
+	if name == "" {
+		name = project.Name
+	}
+	if port := readManifestValue(dir, "port"); port != "" && project.Port == 0 {
+		fmt.Sscanf(port, "%d", &project.Port)
+	}
 	dockerfile := option(args, "dockerfile", "Dockerfile")
 
 	if _, err := os.Stat(filepath.Join(dir, dockerfile)); err != nil {
@@ -142,6 +195,23 @@ func cmdDeploy(args parsedArgs) error {
 			fmt.Fprintln(os.Stderr, "Deploy durduruldu: `cdnctl check` HATA buldu (ayrıntı için çalıştırın).")
 			fmt.Fprintln(os.Stderr, "Bilerek geçmek için: --skip-checks")
 			return errExit(1)
+		}
+	}
+
+	// Resolve the target app before anything expensive happens. Asking after the
+	// build wastes a minute of the user's time on a deploy they may cancel.
+	appUUID := option(args, "app", "")
+	matchedByName := false
+	if appUUID == "" {
+		appUUID = readManifestValue(dir, "app")
+	}
+	if appUUID == "" {
+		appUUID = findAppByName(account, name)
+		matchedByName = appUUID != ""
+	}
+	if matchedByName && !args.Bools["yes"] {
+		if err := confirmOverwrite(account, appUUID, name); err != nil {
+			return err
 		}
 	}
 
@@ -207,10 +277,6 @@ func cmdDeploy(args parsedArgs) error {
 
 	// Uygulama var mı? Varsa yeni tag'e çevir, yoksa oluştur + expose et.
 	fallbackDomain := ""
-	appUUID := option(args, "app", "")
-	if appUUID == "" {
-		appUUID = findAppByName(account, name)
-	}
 	if appUUID != "" {
 		fmt.Printf("→ mevcut uygulama yeni imaja çevriliyor (%s:%s)\n", image, tag)
 		if _, err := requestJSON(http.MethodPatch,
@@ -245,6 +311,11 @@ func cmdDeploy(args parsedArgs) error {
 		if appUUID == "" {
 			printJSONValue(create)
 			return fmt.Errorf("uygulama oluşturulamadı")
+		}
+		// Record it: from here on this folder deploys to this app by id, so a
+		// later name collision cannot silently redirect the deploy elsewhere.
+		if err := setManifestValue(dir, "app", appUUID); err != nil {
+			fmt.Fprintf(os.Stderr, "uyarı: uygulama kimliği cdnctl.yaml'a yazılamadı: %v\n", err)
 		}
 		fmt.Println("→ subdomain atanıyor")
 		exposeResp, err := requestJSON(http.MethodPost,

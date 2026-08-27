@@ -412,3 +412,45 @@ func TestSourceArchiveKeepsDockerfileDespiteDockerignore(t *testing.T) {
 		t.Error("cdnctl.yaml was uploaded despite .dockerignore")
 	}
 }
+
+// The manifest calls itself "the file cdnctl deploy reads", and deploy did not
+// read it: editing name: did nothing and the folder name silently won, so
+// renaming a folder would have created a second app instead of updating the
+// first. These helpers are what makes the manifest authoritative.
+func TestManifestValuesAreReadableAndWritable(t *testing.T) {
+	dir := t.TempDir()
+	manifest := "# comment\nname: gorev-takip   # trailing note\nport: 5001\n"
+	if err := os.WriteFile(filepath.Join(dir, "cdnctl.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readManifestValue(dir, "name"); got != "gorev-takip" {
+		t.Errorf("name = %q, want gorev-takip (trailing comment must not leak in)", got)
+	}
+	if got := readManifestValue(dir, "port"); got != "5001" {
+		t.Errorf("port = %q, want 5001", got)
+	}
+	if got := readManifestValue(dir, "app"); got != "" {
+		t.Errorf("missing key returned %q, want empty", got)
+	}
+
+	// Recording the app id is what separates "the app this folder created" from
+	// "some app with a matching name" on the next deploy.
+	if err := setManifestValue(dir, "app", "abc-123"); err != nil {
+		t.Fatalf("setManifestValue: %v", err)
+	}
+	if got := readManifestValue(dir, "app"); got != "abc-123" {
+		t.Errorf("app = %q after write, want abc-123", got)
+	}
+	if got := readManifestValue(dir, "name"); got != "gorev-takip" {
+		t.Errorf("writing app clobbered name: %q", got)
+	}
+
+	if err := setManifestValue(dir, "app", "def-456"); err != nil {
+		t.Fatalf("setManifestValue (update): %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "cdnctl.yaml"))
+	if strings.Count(string(body), "app:") != 1 {
+		t.Errorf("updating app duplicated the key:\n%s", body)
+	}
+}

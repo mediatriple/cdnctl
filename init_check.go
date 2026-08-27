@@ -631,6 +631,50 @@ EXPOSE %d
 	}
 }
 
+// readManifestValue reads one flat key from cdnctl.yaml. The manifest is
+// deliberately a handful of top-level scalars, so this stays a line scan rather
+// than pulling in a YAML dependency.
+func readManifestValue(dir, key string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "cdnctl.yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, key+":"))
+		if idx := strings.Index(value, " #"); idx >= 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+		return strings.Trim(value, `"'`+"`")
+	}
+	return ""
+}
+
+// setManifestValue records a key in cdnctl.yaml, appending it when absent.
+// Writing the app id after the first deploy is what makes later deploys
+// unambiguous: "the app this folder created" instead of "some app with a
+// matching name", which is the difference between a routine redeploy and
+// overwriting someone else's running service.
+func setManifestValue(dir, key, value string) error {
+	path := filepath.Join(dir, "cdnctl.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), key+":") {
+			lines[i] = key + ": " + value
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+	}
+	body := strings.TrimRight(string(raw), "\n") + "\n" + key + ": " + value + "\n"
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
 // ---------- entitlement ----------
 
 type entitlementState struct {
@@ -645,6 +689,21 @@ type entitlementState struct {
 	// upload time with a 409 the user had no way to anticipate.
 	PlatformActive bool   `json:"platform_active"`
 	ActivateBlock  string `json:"activate_blocked_reason,omitempty"`
+	// What the user could switch to instead of being told "no". Accounts here
+	// are ones that can already run container apps; SparePackages are packages
+	// they have paid for and not yet assigned to any account.
+	ReadyAccounts []readyAccount `json:"ready_accounts,omitempty"`
+	SparePackages []sparePackage `json:"spare_packages,omitempty"`
+}
+
+type readyAccount struct {
+	UUID  string `json:"uuid"`
+	Label string `json:"label,omitempty"`
+}
+
+type sparePackage struct {
+	Name    string `json:"package_name"`
+	MaxApps int    `json:"max_container_apps,omitempty"`
 }
 
 func checkEntitlement() entitlementState {
@@ -659,31 +718,105 @@ func checkEntitlement() entitlementState {
 		state.CheckError = err.Error()
 		return state
 	}
-	packages, ok := resp["account_packages"].([]any)
-	if !ok {
-		return state
-	}
+	// account_packages is NOT this account's package — the endpoint returns the
+	// packages the user has paid for and not yet assigned to any account
+	// (its query is literally "account_packages row IS NULL"). Reading it as an
+	// entitlement is why init announced "Paket hazır" to someone whose account
+	// could not deploy at all. It is still worth reading: an unassigned package
+	// is the cheapest way out of a blocked account, so we offer it as a choice.
+	packages, _ := resp["account_packages"].([]any)
 	for _, raw := range packages {
 		pkg, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if enabled, ok := pkg["managed_platform_enabled"].(float64); ok && enabled == 1 {
+		if enabled, ok := pkg["managed_platform_enabled"].(float64); !ok || enabled != 1 {
+			continue
+		}
+		spare := sparePackage{}
+		if name, ok := pkg["package_name"].(string); ok {
+			spare.Name = name
+		}
+		if max, ok := pkg["managed_max_container_apps"].(float64); ok {
+			spare.MaxApps = int(max)
+		}
+		state.SparePackages = append(state.SparePackages, spare)
+		if !state.PlatformEnabled {
 			state.PlatformEnabled = true
-			if name, ok := pkg["package_name"].(string); ok {
-				state.PackageName = name
+			state.PackageName = spare.Name
+			state.MaxApps = spare.MaxApps
+		}
+	}
+
+	// Accounts that already carry the container platform: switching to one of
+	// these needs no purchase and no activation.
+	if accounts, ok := resp["accounts"].([]any); ok {
+		cfg := readConfig()
+		for _, raw := range accounts {
+			acc, ok := raw.(map[string]any)
+			if !ok {
+				continue
 			}
-			if max, ok := pkg["managed_max_container_apps"].(float64); ok {
-				state.MaxApps = int(max)
+			enabled := false
+			switch flag := acc["platform_apps_enabled"].(type) {
+			case bool:
+				enabled = flag
+			case float64:
+				enabled = flag == 1
 			}
-			break
+			uuid, _ := acc["uuid"].(string)
+			if !enabled || uuid == "" || uuid == cfg.Account {
+				continue
+			}
+			label, _ := acc["domain"].(string)
+			state.ReadyAccounts = append(state.ReadyAccounts, readyAccount{UUID: uuid, Label: label})
 		}
 	}
 
 	if state.PlatformEnabled {
 		state.PlatformActive, state.ActivateBlock = containerPlatformActive()
 	}
+	// When the account really can deploy, its own limits come from the
+	// account-scoped preflight — not from the unassigned-package list above,
+	// which describes packages sitting in the user's basket rather than
+	// anything this account is entitled to.
+	if state.PlatformActive {
+		if name, max, ok := accountEntitlement(); ok {
+			if name != "" {
+				state.PackageName = name
+			}
+			if max > 0 {
+				state.MaxApps = max
+			}
+		}
+	}
 	return state
+}
+
+// accountEntitlement reads the limits the platform will actually enforce for
+// the selected account.
+func accountEntitlement() (string, int, bool) {
+	cfg := readConfig()
+	if cfg.Account == "" {
+		return "", 0, false
+	}
+	resp, err := requestJSON(http.MethodGet, "accounts/"+cfg.Account+"/platform/container/preflight", nil)
+	if err != nil {
+		return "", 0, false
+	}
+	ent, _ := resp["entitlements"].(map[string]any)
+	if ent == nil {
+		return "", 0, false
+	}
+	name, _ := ent["package_name"].(string)
+	limits, _ := ent["limits"].(map[string]any)
+	max := 0
+	if limits != nil {
+		if v, ok := limits["max_container_apps"].(float64); ok {
+			max = int(v)
+		}
+	}
+	return name, max, true
 }
 
 // containerPlatformActive reports whether this account really has the managed
@@ -874,9 +1007,36 @@ func cmdInit(args parsedArgs) error {
 			"Container platformu içeren paket gerekiyor: "+buyNowURL(cfg.Endpoint)+" (ödeme tarayıcıda; sonra `cdnctl init` tekrar — devam eder)")
 	case !report.Entitlement.PlatformActive && report.Entitlement.ActivateBlock != "":
 		// A different platform type already owns this account; that is a decision
-		// for a human, not something the CLI should silently rearrange.
+		// for a human, not something the CLI should silently rearrange. Dead-ending
+		// there is not enough though — the way out is usually already paid for, so
+		// list it.
 		report.NextSteps = append(report.NextSteps,
-			"Container app'ler bu hesapta kullanılamıyor: "+report.Entitlement.ActivateBlock+" — bir hesap tek platform tipi çalıştırır. Container app'ler için ayrı bir hesap kullanın ya da panelden Platformlar sekmesine bakın.")
+			"Container app'ler bu hesapta kullanılamıyor: "+report.Entitlement.ActivateBlock+" — bir hesap tek platform tipi çalıştırır.")
+		for _, acc := range report.Entitlement.ReadyAccounts {
+			label := acc.Label
+			if label == "" {
+				label = acc.UUID
+			}
+			report.NextSteps = append(report.NextSteps,
+				fmt.Sprintf("Hazır hesap: %s → `cdnctl accounts use %s`", label, acc.UUID))
+		}
+		if len(report.Entitlement.SparePackages) > 0 {
+			names := []string{}
+			for _, pkg := range report.Entitlement.SparePackages {
+				if pkg.MaxApps > 0 {
+					names = append(names, fmt.Sprintf("%s (%d app)", pkg.Name, pkg.MaxApps))
+				} else {
+					names = append(names, pkg.Name)
+				}
+			}
+			report.NextSteps = append(report.NextSteps,
+				fmt.Sprintf("Hesabınıza atanmamış %d paket var: %s — panelden yeni bir hesaba atayın, sonra `cdnctl accounts use <uuid>`. Yeni satın alma gerekmez.",
+					len(names), strings.Join(names, ", ")))
+		}
+		if len(report.Entitlement.ReadyAccounts) == 0 && len(report.Entitlement.SparePackages) == 0 {
+			report.NextSteps = append(report.NextSteps,
+				"Container app'ler için ayrı bir hesap açıp paket atayın (panel → Hesaplar).")
+		}
 	case !report.Entitlement.PlatformActive:
 		// The package allows container apps but the platform was never activated.
 		// Do it here: it is one idempotent call, and finding out at upload time
@@ -1001,11 +1161,13 @@ func printInitHuman(r initReport) {
 	}
 	if r.Entitlement.LoggedIn {
 		if r.Entitlement.PlatformEnabled {
-			state := ""
-			if !r.Entitlement.PlatformActive {
-				state = " — platform aktif değil"
+			if r.Entitlement.PlatformActive {
+				fmt.Printf("Paket    : ✓ %s (max %d app)\n", r.Entitlement.PackageName, r.Entitlement.MaxApps)
+			} else {
+				// Do not dress an unassigned package up as this account's plan:
+				// that is the line that told a blocked user everything was ready.
+				fmt.Printf("Paket    : bu hesapta container platformu aktif değil (elinizde atanmamış paket: %s)\n", r.Entitlement.PackageName)
 			}
-			fmt.Printf("Paket    : ✓ %s (max %d app)%s\n", r.Entitlement.PackageName, r.Entitlement.MaxApps, state)
 		} else {
 			fmt.Println("Paket    : ✗ container platformu yok")
 		}
