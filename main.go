@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.18.4"
+var version = "0.18.5"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -127,6 +127,7 @@ Usage:
   cdnctl login [--email user@example.com] [--password <password>] [--endpoint https://cdn.com.tr]
                 (omit --email/--password to be prompted; password input is hidden and never enters shell history)
   cdnctl whoami                     (show endpoint, logged-in user, and selected account; alias: status)
+  cdnctl version                    (print the installed version; alias: --version)
   cdnctl logout                     (forget the saved token, default account, and email; keeps the endpoint)
   cdnctl update --check
   cdnctl update [--yes] [--version 0.1.2] [--bin-dir "$HOME/.local/bin"] [--allow-downgrade]
@@ -146,7 +147,7 @@ Usage:
   cdnctl files mkdir [--account <uuid>] --path <path>
   cdnctl container apps list --account <uuid>
   cdnctl container apps create --account <uuid> --name mobile-backend --image registry.example.com/acme/mobile-backend --tag 1.0.0 --port 8080 --healthcheck /health --healthcheck-type http|tcp|none --metrics-port 2112 --metrics-path /metrics --domain api.example.com --registry-credential <credential_uuid> --persistent-mount-path /app/data --persistent-storage-gb 5
-  cdnctl container apps update --account <uuid> --app <app_uuid> --domain api.example.com --healthcheck-type tcp --metrics-port 2112 --env-json '{"APP_URL":"https://api.example.com"}' [--env KEY=VALUE ...] [--unset-env KEY ...] [--replace-env] [--secret KEY=VALUE ...] [--unset-secret KEY ...] [--persistent-storage-gb 10]
+  cdnctl container apps update --account <uuid> --app <app_uuid> --domain api.example.com --healthcheck-type tcp --metrics-port 2112 --env-json '{"APP_URL":"https://api.example.com"}' [--env KEY=VALUE ...] [--unset-env KEY ...] [--replace-env] [--secret KEY=VALUE ...] [--unset-secret KEY ...] [--persistent-mount-path /app/data] [--persistent-storage-gb 10]
       env semantics: --env-json and --env MERGE into the existing env map by default;
       pass --replace-env to REPLACE the whole map (keys not listed are removed)
       secrets vs env: use --secret for sensitive values (API keys, tokens). A key
@@ -168,6 +169,7 @@ Usage:
   cdnctl container apps diagnose --account <uuid> --app <app_uuid>
   cdnctl container apps logs --account <uuid> --app <app_uuid> --tail 100 [--previous]
   cdnctl container preflight --account <uuid>
+  cdnctl container usage --account <uuid>       (platform kullanım/metering özeti)
   cdnctl container registry-credentials list --account <uuid>
   cdnctl container registry-credentials create --account <uuid> --name docker --registry-url https://index.docker.io/v1/ --username <user> --password <token>
   cdnctl container registry-credentials delete --account <uuid> --credential <credential_uuid> --yes
@@ -1298,10 +1300,16 @@ func cmdContainer(args parsedArgs) error {
 	}
 	resource := args.Positionals[0]
 
-	// "preflight" is a standalone sub-command with no further positional.
+	// "preflight" and "usage" are standalone sub-commands with no further positional.
 	if resource == "preflight" {
 		account := resolveAccount(args)
 		return printRequest(http.MethodGet, fmt.Sprintf("accounts/%s/platform/container/preflight", account), nil)
+	}
+	// The help centre documented `container usage` in seven locales while the CLI
+	// had no such command — the endpoint existed, only the wiring was missing.
+	if resource == "usage" {
+		account := resolveAccount(args)
+		return printRequest(http.MethodGet, fmt.Sprintf("accounts/%s/platform/container/usage", account), nil)
 	}
 
 	if len(args.Positionals) < 2 {

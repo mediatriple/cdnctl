@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -354,9 +355,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0184(t *testing.T) {
-	if version != "0.18.4" {
-		t.Fatalf("expected version 0.18.4, got %s", version)
+func TestVersionIs0185(t *testing.T) {
+	if version != "0.18.5" {
+		t.Fatalf("expected version 0.18.5, got %s", version)
 	}
 }
 
@@ -1024,4 +1025,89 @@ func TestPrintedJSONDoesNotHTMLEscape(t *testing.T) {
 	if !strings.Contains(out, "brew update && brew upgrade cdnctl") {
 		t.Errorf("literal && missing from output: %s", out)
 	}
+}
+
+// Every command cdnctl tells you to run must be a command cdnctl has.
+//
+// The CLI's own messages drifted the same way the help centre did: deploy said
+// "`cdnctl init` bir şablon üretebilir" while init wrote no Dockerfile, and the
+// generated manifest called itself the file "cdnctl deploy reads" while deploy
+// ignored it. Those were caught by a user, not by a test. This one reads the
+// backticked commands out of the source's own message strings and checks each
+// against the dispatch table.
+func TestCommandsMentionedInOwnMessagesExist(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var usageBanner string
+	if m := regexp.MustCompile("(?s)func usage\\(w io\\.Writer\\) \\{\\s*fmt\\.Fprintf\\(w, `(.*?)`").FindStringSubmatch(readFileForTest(t, "main.go")); m != nil {
+		usageBanner = m[1]
+	}
+	if usageBanner == "" {
+		t.Fatal("could not read the usage banner")
+	}
+
+	known := map[string]bool{}
+	for _, line := range strings.Split(usageBanner, "\n") {
+		if m := regexp.MustCompile(`^\s*cdnctl ((?:[a-z0-9][a-z0-9-]*)(?:\s+[a-z0-9][a-z0-9-]*)*)`).FindStringSubmatch(line); m != nil {
+			known[strings.TrimSpace(m[1])] = true
+		}
+	}
+	for _, m := range regexp.MustCompile(`\tcase "([a-z0-9-]+)":`).FindAllStringSubmatch(readFileForTest(t, "main.go"), -1) {
+		known[m[1]] = true
+	}
+	// Some commands are handled before the dispatch switch (version, --version).
+	for _, m := range regexp.MustCompile(`args\[0\] == "([a-z0-9-]+)"`).FindAllStringSubmatch(readFileForTest(t, "main.go"), -1) {
+		known[m[1]] = true
+	}
+
+	resolve := func(words []string) bool {
+		for n := len(words); n > 0 && n <= 4; n-- {
+			if known[strings.Join(words[:n], " ")] {
+				return true
+			}
+		}
+		for n := 4; n > 0; n-- {
+			if n <= len(words) && known[strings.Join(words[:n], " ")] {
+				return true
+			}
+		}
+		return false
+	}
+
+	mention := regexp.MustCompile("`cdnctl ([a-z0-9][a-zA-Z0-9 ._<>/-]{0,60})`")
+	for _, file := range sources {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body := readFileForTest(t, file)
+		if file == "main.go" {
+			body = strings.Replace(body, usageBanner, "", 1) // banner defines, it does not promise
+		}
+		for _, m := range mention.FindAllStringSubmatch(body, -1) {
+			fields := strings.Fields(m[1])
+			words := []string{}
+			for _, f := range fields {
+				if strings.HasPrefix(f, "-") || strings.HasPrefix(f, "<") {
+					break
+				}
+				words = append(words, f)
+			}
+			if len(words) == 0 || resolve(words) {
+				continue
+			}
+			t.Errorf("%s promises `cdnctl %s`, which is not a command", file, strings.Join(words, " "))
+		}
+	}
+}
+
+func readFileForTest(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
 }
