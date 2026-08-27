@@ -200,3 +200,114 @@ func TestOpenDecisionsOfferSourceAndPackage(t *testing.T) {
 		t.Fatalf("deploy-method + package karari bekleniyordu: %+v", decisions)
 	}
 }
+
+// init promises a Dockerfile and deploy refuses to run without one. For the
+// first three months that promise was unimplemented: init wrote only
+// cdnctl.yaml and AGENTS.md, so a Flask user ran init, ran deploy, was told to
+// run init, and had no way out of the loop.
+func TestInitWritesRunnableDockerfileForDetectedStacks(t *testing.T) {
+	cases := []struct {
+		name    string
+		files   map[string]string
+		wantIn  []string
+		wantIgn string
+	}{
+		{
+			name:    "python-flask",
+			files:   map[string]string{"requirements.txt": "flask==3.0.0\n", "app.py": "app.run(host=\"0.0.0.0\", port=5001)\n"},
+			wantIn:  []string{"FROM python:", "0.0.0.0:5001", "pip install"},
+			wantIgn: "__pycache__",
+		},
+		{
+			name:    "node",
+			files:   map[string]string{"package.json": `{"name":"x","dependencies":{"express":"^4"}}`, "server.js": ".listen(3000"},
+			wantIn:  []string{"FROM node:", "npm ci"},
+			wantIgn: "node_modules",
+		},
+		{
+			name:    "static",
+			files:   map[string]string{"index.html": "<h1>x</h1>"},
+			wantIn:  []string{"FROM nginx:"},
+			wantIgn: ".git",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, body := range tc.files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			wrote, err := writeDockerfile(dir, detectProject(dir))
+			if err != nil {
+				t.Fatalf("writeDockerfile: %v", err)
+			}
+			if len(wrote) == 0 {
+				t.Fatal("no Dockerfile written — deploy would dead-end here")
+			}
+
+			body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+			if err != nil {
+				t.Fatalf("Dockerfile unreadable: %v", err)
+			}
+			for _, want := range tc.wantIn {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("Dockerfile missing %q:\n%s", want, body)
+				}
+			}
+			// The .dockerignore is half the fix: without it COPY . . bakes the
+			// host dependency directory into the image (the ERR_DLOPEN_FAILED
+			// crashloop we hit in testing).
+			ignore, err := os.ReadFile(filepath.Join(dir, ".dockerignore"))
+			if err != nil {
+				t.Fatalf(".dockerignore not written: %v", err)
+			}
+			if !strings.Contains(string(ignore), tc.wantIgn) {
+				t.Errorf(".dockerignore missing %q:\n%s", tc.wantIgn, ignore)
+			}
+		})
+	}
+}
+
+// A hand-written Dockerfile is the author's decision; init must never replace it.
+func TestInitLeavesAnExistingDockerfileAlone(t *testing.T) {
+	dir := t.TempDir()
+	mine := "FROM scratch\n# mine\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wrote, err := writeDockerfile(dir, detectProject(dir))
+	if err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	if len(wrote) != 0 {
+		t.Errorf("wrote %v over an existing Dockerfile", wrote)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if string(body) != mine {
+		t.Errorf("existing Dockerfile was modified:\n%s", body)
+	}
+}
+
+// An unrecognised stack gets no guessed Dockerfile — init says so instead, which
+// is the honest exit from the loop.
+func TestInitWritesNoDockerfileForUnknownStack(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.c"), []byte("int main(){}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wrote, err := writeDockerfile(dir, detectProject(dir))
+	if err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	if len(wrote) != 0 {
+		t.Errorf("guessed a Dockerfile for an unknown stack: %v", wrote)
+	}
+}

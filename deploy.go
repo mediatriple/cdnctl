@@ -123,7 +123,7 @@ func cmdDeploy(args parsedArgs) error {
 	dockerfile := option(args, "dockerfile", "Dockerfile")
 
 	if _, err := os.Stat(filepath.Join(dir, dockerfile)); err != nil {
-		return fmt.Errorf("%s bulunamadı — `cdnctl init` bir şablon üretebilir", dockerfile)
+		return fmt.Errorf("%s bulunamadı. `cdnctl init` çalıştırın: tanıdığı proje tipleri (node, python, go, php, statik) için şablon yazar. Tanımadığı bir yığınsa Dockerfile'ı kendiniz yazmanız gerekir", dockerfile)
 	}
 
 	// Karne kapısı: hatalı deploy zaten çalışmayan bir site üretir; agent'lar
