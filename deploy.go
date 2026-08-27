@@ -30,7 +30,7 @@ var deployExcludes = map[string]bool{
 	"__pycache__": true, "dist": true, ".next": true, "vendor": true,
 }
 
-func makeSourceArchive(dir string) (string, int64, error) {
+func makeSourceArchive(dir, dockerfile string) (string, int64, error) {
 	// .dockerignore'daki düz dizin/dosya adlarını da dışla — build bağlamıyla aynı kalsın.
 	extra := map[string]bool{}
 	if raw, err := os.ReadFile(filepath.Join(dir, ".dockerignore")); err == nil {
@@ -41,6 +41,14 @@ func makeSourceArchive(dir string) (string, int64, error) {
 			}
 		}
 	}
+	// The Dockerfile is the build instruction, not build content: listing it in
+	// .dockerignore (which is idiomatic — it keeps the file out of the image)
+	// must never keep it out of the tarball, or the builder has nothing to
+	// build and fails with "error resolving dockerfile path".
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+	delete(extra, dockerfile)
 
 	out, err := os.CreateTemp("", "cdnctl-source-*.tar.gz")
 	if err != nil {
@@ -138,7 +146,7 @@ func cmdDeploy(args parsedArgs) error {
 	}
 
 	fmt.Printf("→ kaynak arşivleniyor (%s)\n", name)
-	archive, size, err := makeSourceArchive(dir)
+	archive, size, err := makeSourceArchive(dir, dockerfile)
 	if err != nil {
 		return err
 	}

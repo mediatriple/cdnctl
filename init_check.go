@@ -14,6 +14,7 @@ package main
 // `init` only calls the API to read entitlements, and only when a token exists.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -274,7 +275,7 @@ func runChecks(dir string) []finding {
 		}
 		isEnvExample := strings.Contains(base, ".env.example") || strings.Contains(base, ".env.sample")
 
-		if loc := reListenLocalhost.FindIndex(content); loc != nil && !strings.Contains(base, "test") {
+		if loc := findOutsideComments(content, reListenLocalhost); loc != nil && !strings.Contains(base, "test") {
 			findings = append(findings, finding{
 				Rule: "bind-localhost", Severity: "error", File: rel(path), Line: lineOf(content, loc[0]),
 				Message: "Uygulama 127.0.0.1/localhost'a bağlanıyor — container içinde dışarıdan erişilemez, deploy edilince site açılmaz.",
@@ -638,6 +639,12 @@ type entitlementState struct {
 	PackageName     string `json:"package_name,omitempty"`
 	MaxApps         int    `json:"max_container_apps,omitempty"`
 	CheckError      string `json:"check_error,omitempty"`
+	// PlatformActive separates "your package allows container apps" from "this
+	// account actually has the Managed Container Apps platform". Only the first
+	// was ever checked, so init reported "Paket hazır" and deploy then died at
+	// upload time with a 409 the user had no way to anticipate.
+	PlatformActive bool   `json:"platform_active"`
+	ActivateBlock  string `json:"activate_blocked_reason,omitempty"`
 }
 
 func checkEntitlement() entitlementState {
@@ -672,7 +679,72 @@ func checkEntitlement() entitlementState {
 			break
 		}
 	}
+
+	if state.PlatformEnabled {
+		state.PlatformActive, state.ActivateBlock = containerPlatformActive()
+	}
 	return state
+}
+
+// containerPlatformActive reports whether this account really has the managed
+// container platform. The entitlement flag on the package is necessary but not
+// sufficient: the platform row is created by a separate activation step, and
+// the container endpoints answer 409 until it exists.
+//
+// It reads accounts/{uuid}/platform, which reports both the platform type and
+// the additive platform_apps_enabled flag. Probing the apps listing instead
+// looks like it works and is useless: that endpoint does not require the
+// platform, so it answers 200 for an account that cannot deploy at all.
+func containerPlatformActive() (bool, string) {
+	cfg := readConfig()
+	if cfg.Account == "" {
+		return false, ""
+	}
+	resp, err := requestJSON(http.MethodGet, "accounts/"+cfg.Account+"/platform", nil)
+	if err != nil {
+		// Unknown state: do not invent a blocker the user cannot act on.
+		return true, ""
+	}
+	platform, _ := resp["platform"].(map[string]any)
+	if platform == nil {
+		return false, ""
+	}
+	kind, _ := platform["type"].(string)
+	if kind == "managed-container" {
+		return true, ""
+	}
+	// Container apps can run alongside another delivery type, but only once the
+	// additive flag is set — that is what activation does.
+	if enabled, ok := platform["platform_apps_enabled"].(bool); ok && enabled {
+		return true, ""
+	}
+	if kind != "" {
+		return false, fmt.Sprintf("bu hesapta %s platformu çalışıyor", kind)
+	}
+	return false, ""
+}
+
+// activateContainerPlatform turns the entitlement into a usable platform. The
+// panel button does exactly this call; doing it from the CLI keeps a first
+// deploy from dead-ending on a step nobody told the user about.
+func activateContainerPlatform() (string, error) {
+	cfg := readConfig()
+	if cfg.Account == "" {
+		return "", fmt.Errorf("hesap seçili değil")
+	}
+	resp, err := requestJSON(http.MethodPost, "accounts/"+cfg.Account+"/platform/enable-apps", map[string]any{})
+	if err != nil {
+		return "", err
+	}
+	if status, _ := resp["status"].(string); status != "success" {
+		msg, _ := resp["message"].(string)
+		if msg == "" {
+			msg = "aktivasyon reddedildi"
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+	msg, _ := resp["message"].(string)
+	return msg, nil
 }
 
 // buyNowURL carries the need as context. The panel does not read these parameters
@@ -728,6 +800,7 @@ type initReport struct {
 	Decisions   []decision       `json:"decisions"`
 	Findings    []finding        `json:"findings"`
 	Wrote       []string         `json:"wrote"`
+	Notes       []string         `json:"notes,omitempty"`
 	NextSteps   []string         `json:"next_steps"`
 }
 
@@ -799,6 +872,27 @@ func cmdInit(args parsedArgs) error {
 	case !report.Entitlement.PlatformEnabled:
 		report.NextSteps = append(report.NextSteps,
 			"Container platformu içeren paket gerekiyor: "+buyNowURL(cfg.Endpoint)+" (ödeme tarayıcıda; sonra `cdnctl init` tekrar — devam eder)")
+	case !report.Entitlement.PlatformActive && report.Entitlement.ActivateBlock != "":
+		// A different platform type already owns this account; that is a decision
+		// for a human, not something the CLI should silently rearrange.
+		report.NextSteps = append(report.NextSteps,
+			"Container app'ler bu hesapta kullanılamıyor: "+report.Entitlement.ActivateBlock+" — bir hesap tek platform tipi çalıştırır. Container app'ler için ayrı bir hesap kullanın ya da panelden Platformlar sekmesine bakın.")
+	case !report.Entitlement.PlatformActive:
+		// The package allows container apps but the platform was never activated.
+		// Do it here: it is one idempotent call, and finding out at upload time
+		// (409, mid-deploy) is exactly the dead-end this command exists to avoid.
+		if msg, err := activateContainerPlatform(); err != nil {
+			report.NextSteps = append(report.NextSteps,
+				"Paketiniz container app'leri kapsıyor ama platform aktif değil ve otomatik aktivasyon başarısız: "+err.Error()+" — panelden Managed Container Apps'i etkinleştirin.")
+		} else {
+			report.Entitlement.PlatformActive = true
+			if msg != "" {
+				report.Notes = append(report.Notes, "Managed Container Apps bu hesapta etkinleştirildi.")
+			}
+			report.NextSteps = append(report.NextSteps,
+				fmt.Sprintf("Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez).",
+					report.Entitlement.PackageName, report.Entitlement.MaxApps))
+		}
 	default:
 		report.NextSteps = append(report.NextSteps,
 			fmt.Sprintf("Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez).",
@@ -852,6 +946,29 @@ func cmdCheck(args parsedArgs) error {
 	return nil
 }
 
+// findOutsideComments matches a rule against code only, skipping comment lines.
+// A comment is documentation, not behaviour: the generated Dockerfile explains
+// "bind 0.0.0.0, not 127.0.0.1" and the bind-localhost rule read its own advice
+// as the defect, blocking deploy on a file cdnctl had just written. A user
+// writing the same note in their own code hit it too.
+func findOutsideComments(content []byte, re *regexp.Regexp) []int {
+	offset := 0
+	for _, line := range bytes.SplitAfter(content, []byte("\n")) {
+		trimmed := bytes.TrimLeft(line, " \t")
+		isComment := bytes.HasPrefix(trimmed, []byte("#")) ||
+			bytes.HasPrefix(trimmed, []byte("//")) ||
+			bytes.HasPrefix(trimmed, []byte("*")) ||
+			bytes.HasPrefix(trimmed, []byte("/*"))
+		if !isComment {
+			if loc := re.FindIndex(line); loc != nil {
+				return []int{offset + loc[0], offset + loc[1]}
+			}
+		}
+		offset += len(line)
+	}
+	return nil
+}
+
 func hasErrors(findings []finding) bool {
 	return countSeverity(findings, "error") > 0
 }
@@ -884,7 +1001,11 @@ func printInitHuman(r initReport) {
 	}
 	if r.Entitlement.LoggedIn {
 		if r.Entitlement.PlatformEnabled {
-			fmt.Printf("Paket    : ✓ %s (max %d app)\n", r.Entitlement.PackageName, r.Entitlement.MaxApps)
+			state := ""
+			if !r.Entitlement.PlatformActive {
+				state = " — platform aktif değil"
+			}
+			fmt.Printf("Paket    : ✓ %s (max %d app)%s\n", r.Entitlement.PackageName, r.Entitlement.MaxApps, state)
 		} else {
 			fmt.Println("Paket    : ✗ container platformu yok")
 		}
@@ -895,6 +1016,9 @@ func printInitHuman(r initReport) {
 		fmt.Printf("Karne    : %d HATA, %d uyarı — ayrıntı: cdnctl check\n", n, countSeverity(r.Findings, "warning"))
 	} else if n := countSeverity(r.Findings, "warning"); n > 0 {
 		fmt.Printf("Karne    : %d uyarı — ayrıntı: cdnctl check\n", n)
+	}
+	for _, note := range r.Notes {
+		fmt.Printf("Not      : %s\n", note)
 	}
 	if len(r.Wrote) > 0 {
 		fmt.Printf("Yazıldı  : %s\n", strings.Join(r.Wrote, ", "))

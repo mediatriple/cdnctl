@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,5 +311,104 @@ func TestInitWritesNoDockerfileForUnknownStack(t *testing.T) {
 	}
 	if len(wrote) != 0 {
 		t.Errorf("guessed a Dockerfile for an unknown stack: %v", wrote)
+	}
+}
+
+// The rules read code, not comments. cdnctl's own generated Dockerfile carries
+// the line "Bind 0.0.0.0, not 127.0.0.1" as advice; bind-localhost matched that
+// comment and blocked deploy on a file cdnctl had just written itself.
+func TestChecksIgnoreCommentedLocalhost(t *testing.T) {
+	dir := t.TempDir()
+	dockerfile := "FROM python:3.12-slim\n" +
+		"# Bind 0.0.0.0, not 127.0.0.1: the platform reaches the container from outside.\n" +
+		"CMD [\"gunicorn\", \"--bind\", \"0.0.0.0:5001\", \"app:app\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, f := range runChecks(dir) {
+		if f.Rule == "bind-localhost" {
+			t.Errorf("commented advice flagged as a real bind: %s:%d %s", f.File, f.Line, f.Message)
+		}
+	}
+}
+
+// A genuine localhost bind in code must still be caught — the comment skip
+// must not become a way to hide the defect.
+func TestChecksStillCatchRealLocalhostBind(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.py"), []byte("app.run(host=\"127.0.0.1\", port=5001)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	for _, f := range runChecks(dir) {
+		if f.Rule == "bind-localhost" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a real 127.0.0.1 bind was not reported")
+	}
+}
+
+// The tarball IS the build context, so the Dockerfile must be inside it even
+// though .dockerignore lists it — listing it there is idiomatic (it keeps the
+// file out of the image) and used to strip it from the upload, leaving Kaniko
+// with "error resolving dockerfile path" on a project cdnctl had just scaffolded.
+func TestSourceArchiveKeepsDockerfileDespiteDockerignore(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"Dockerfile":    "FROM python:3.12-slim\n",
+		".dockerignore": "Dockerfile\n.dockerignore\ncdnctl.yaml\n__pycache__\n",
+		"app.py":        "print(1)\n",
+		"cdnctl.yaml":   "name: x\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	archive, _, err := makeSourceArchive(dir, "Dockerfile")
+	if err != nil {
+		t.Fatalf("makeSourceArchive: %v", err)
+	}
+	defer os.Remove(archive)
+
+	names := map[string]bool{}
+	f, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		names[hdr.Name] = true
+	}
+
+	if !names["Dockerfile"] {
+		t.Error("Dockerfile missing from the build context — the build cannot start")
+	}
+	if !names["app.py"] {
+		t.Error("app.py missing from the build context")
+	}
+	// The rest of .dockerignore must still be honoured.
+	if names["cdnctl.yaml"] {
+		t.Error("cdnctl.yaml was uploaded despite .dockerignore")
 	}
 }
