@@ -42,7 +42,7 @@ func confirmOverwrite(account, appUUID, name string) error {
 	domain := findString(detail, "domain")
 	image := findString(detail, "image")
 
-	fmt.Fprintf(os.Stderr, T("\nThis account already has an app named \"%s\":\n", "\nBu hesapta \"%s\" adında bir uygulama zaten var:\n"), name)
+	fmt.Fprintf(os.Stderr, T("\nThis account already has an app named \"%s\":\n"), name)
 	fmt.Fprintf(os.Stderr, "  id     : %s\n", appUUID)
 	if domain != "" {
 		fmt.Fprintf(os.Stderr, "  adres  : https://%s\n", domain)
@@ -50,21 +50,21 @@ func confirmOverwrite(account, appUUID, name string) error {
 	if image != "" {
 		fmt.Fprintf(os.Stderr, "  imaj   : %s\n", image)
 	}
-	fmt.Fprintln(os.Stderr, T("Continuing REPLACES that app with your new image.", "Devam ederseniz bu uygulama yeni imajınızla DEĞİŞTİRİLİR."))
+	fmt.Fprintln(os.Stderr, T("Continuing REPLACES that app with your new image."))
 
 	stat, err := os.Stdin.Stat()
 	interactive := err == nil && (stat.Mode()&os.ModeCharDevice) != 0
 	if !interactive {
-		fmt.Fprintln(os.Stderr, T("Cannot ask for confirmation (no terminal). To overwrite deliberately: --yes", "Onay alınamıyor (terminal yok). Bilerek üzerine yazmak için: --yes"))
-		fmt.Fprintln(os.Stderr, T("If you want a separate app: --name <other-name>", "Ayrı bir uygulama istiyorsanız: --name <baska-ad>"))
+		fmt.Fprintln(os.Stderr, T("Cannot ask for confirmation (no terminal). To overwrite deliberately: --yes"))
+		fmt.Fprintln(os.Stderr, T("If you want a separate app: --name <other-name>"))
 		return errExit(1)
 	}
 
-	fmt.Fprint(os.Stderr, T("Overwrite it? (yes/no): ", "Üzerine yazılsın mı? (evet/hayır): "))
+	fmt.Fprint(os.Stderr, T("Overwrite it? (yes/no): "))
 	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	answer = strings.ToLower(strings.TrimSpace(answer))
-	if answer != "evet" && answer != "e" && answer != "yes" && answer != "y" {
-		fmt.Fprintln(os.Stderr, T("Cancelled. For a separate app: --name <other-name>", "İptal edildi. Ayrı bir uygulama için: --name <baska-ad>"))
+	if !isAffirmative(answer) {
+		fmt.Fprintln(os.Stderr, T("Cancelled. For a separate app: --name <other-name>"))
 		return errExit(1)
 	}
 	return nil
@@ -184,7 +184,7 @@ func cmdDeploy(args parsedArgs) error {
 	dockerfile := option(args, "dockerfile", "Dockerfile")
 
 	if _, err := os.Stat(filepath.Join(dir, dockerfile)); err != nil {
-		return fmt.Errorf(T("%s not found. Run `cdnctl init`: it writes a template for the project types it knows (node, python, go, php, static). For a stack it does not recognise you need to write the Dockerfile yourself", "%s bulunamadı. `cdnctl init` çalıştırın: tanıdığı proje tipleri (node, python, go, php, statik) için şablon yazar. Tanımadığı bir yığınsa Dockerfile'ı kendiniz yazmanız gerekir"), dockerfile)
+		return fmt.Errorf(T("%s not found. Run `cdnctl init`: it writes a template for the project types it knows (node, python, go, php, static). For a stack it does not recognise you need to write the Dockerfile yourself"), dockerfile)
 	}
 
 	// Karne kapısı: hatalı deploy zaten çalışmayan bir site üretir; agent'lar
@@ -192,8 +192,8 @@ func cmdDeploy(args parsedArgs) error {
 	if !args.Bools["skip-checks"] {
 		findings := runChecks(dir)
 		if hasErrors(findings) {
-			fmt.Fprintln(os.Stderr, T("Deploy stopped: `cdnctl check` found ERRORS (run it for detail).", "Deploy durduruldu: `cdnctl check` HATA buldu (ayrıntı için çalıştırın)."))
-			fmt.Fprintln(os.Stderr, T("To skip deliberately: --skip-checks", "Bilerek geçmek için: --skip-checks"))
+			fmt.Fprintln(os.Stderr, T("Deploy stopped: `cdnctl check` found ERRORS (run it for detail)."))
+			fmt.Fprintln(os.Stderr, T("To skip deliberately: --skip-checks"))
 			return errExit(1)
 		}
 	}
@@ -215,13 +215,13 @@ func cmdDeploy(args parsedArgs) error {
 		}
 	}
 
-	fmt.Printf(T("→ archiving source (%s)\n", "→ kaynak arşivleniyor (%s)\n"), name)
+	fmt.Printf(T("→ archiving source (%s)\n"), name)
 	archive, size, err := makeSourceArchive(dir, dockerfile)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(archive)
-	fmt.Printf(T("→ uploading (%.1f MB)\n", "→ yükleniyor (%.1f MB)\n"), float64(size)/1024/1024)
+	fmt.Printf(T("→ uploading (%.1f MB)\n"), float64(size)/1024/1024)
 
 	up, err := requestMultipart(http.MethodPost,
 		fmt.Sprintf("accounts/%s/platform/container/source/upload", account),
@@ -232,10 +232,10 @@ func cmdDeploy(args parsedArgs) error {
 	sourceID, _ := up["source_id"].(string)
 	if sourceID == "" {
 		printJSONValue(up)
-		return fmt.Errorf(T("upload failed", "yükleme başarısız"))
+		return fmt.Errorf(T("upload failed"))
 	}
 
-	fmt.Println(T("→ starting build (Kaniko, isolated sandbox)", "→ build başlatılıyor (Kaniko, izole sandbox)"))
+	fmt.Println(T("→ starting build (Kaniko, isolated sandbox)"))
 	start, err := requestJSON(http.MethodPost,
 		fmt.Sprintf("accounts/%s/platform/container/source/build", account),
 		map[string]any{"source_id": sourceID, "name": name, "dockerfile": dockerfile})
@@ -247,7 +247,7 @@ func cmdDeploy(args parsedArgs) error {
 	tag, _ := start["tag"].(string)
 	if buildID == "" || image == "" {
 		printJSONValue(start)
-		return fmt.Errorf(T("could not start the build", "build başlatılamadı"))
+		return fmt.Errorf(T("could not start the build"))
 	}
 
 	deadline := time.Now().Add(20 * time.Minute)
@@ -267,7 +267,7 @@ func cmdDeploy(args parsedArgs) error {
 		time.Sleep(10 * time.Second)
 	}
 	if phase != "success" {
-		fmt.Fprintln(os.Stderr, T("Build failed or timed out. Logs:", "Build başarısız/zaman aşımı. Loglar:"))
+		fmt.Fprintln(os.Stderr, T("Build failed or timed out. Logs:"))
 		logs, _ := requestJSON(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/source/build/logs", account),
 			map[string]any{"build_id": buildID})
@@ -278,7 +278,7 @@ func cmdDeploy(args parsedArgs) error {
 	// Uygulama var mı? Varsa yeni tag'e çevir, yoksa oluştur + expose et.
 	fallbackDomain := ""
 	if appUUID != "" {
-		fmt.Printf(T("→ pointing the existing app at the new image (%s:%s)\n", "→ mevcut uygulama yeni imaja çevriliyor (%s:%s)\n"), image, tag)
+		fmt.Printf(T("→ pointing the existing app at the new image (%s:%s)\n"), image, tag)
 		if _, err := requestJSON(http.MethodPatch,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID),
 			map[string]any{"image": image, "tag": tag}); err != nil {
@@ -286,14 +286,14 @@ func cmdDeploy(args parsedArgs) error {
 		}
 		// PATCH calisan uygulamayi dondurur ama DURMUS olani baslatmaz (canlida
 		// olculdu) — rollout'u her durumda acikca tetikle.
-		fmt.Println(T("→ triggering rollout", "→ rollout tetikleniyor"))
+		fmt.Println(T("→ triggering rollout"))
 		if _, err := requestJSON(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s/deploy", account, appUUID),
 			map[string]any{}); err != nil {
 			return err
 		}
 	} else {
-		fmt.Println(T("→ creating the app", "→ uygulama oluşturuluyor"))
+		fmt.Println(T("→ creating the app"))
 		port := project.Port
 		if port == 0 {
 			port = 8080
@@ -310,14 +310,14 @@ func cmdDeploy(args parsedArgs) error {
 		appUUID = extractAppUUID(create)
 		if appUUID == "" {
 			printJSONValue(create)
-			return fmt.Errorf(T("could not create the app", "uygulama oluşturulamadı"))
+			return fmt.Errorf(T("could not create the app"))
 		}
 		// Record it: from here on this folder deploys to this app by id, so a
 		// later name collision cannot silently redirect the deploy elsewhere.
 		if err := setManifestValue(dir, "app", appUUID); err != nil {
-			fmt.Fprintf(os.Stderr, T("warning: could not record the app id in cdnctl.yaml: %v\n", "uyarı: uygulama kimliği cdnctl.yaml'a yazılamadı: %v\n"), err)
+			fmt.Fprintf(os.Stderr, T("warning: could not record the app id in cdnctl.yaml: %v\n"), err)
 		}
-		fmt.Println(T("→ assigning a subdomain", "→ subdomain atanıyor"))
+		fmt.Println(T("→ assigning a subdomain"))
 		exposeResp, err := requestJSON(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s/expose", account, appUUID),
 			map[string]any{})
@@ -330,7 +330,7 @@ func cmdDeploy(args parsedArgs) error {
 		// create app'i "stopped" bırakır: pod'u ancak deploy başlatır. (İlk canlı
 		// koşuda atlanmıştı — uygulama oluştu, expose oldu ve sonsuza dek "deploying"
 		// göründü çünkü hiç pod yoktu.)
-		fmt.Println(T("→ starting the first deploy", "→ ilk deploy başlatılıyor"))
+		fmt.Println(T("→ starting the first deploy"))
 		if _, err := requestJSON(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s/deploy", account, appUUID),
 			map[string]any{}); err != nil {
@@ -339,7 +339,7 @@ func cmdDeploy(args parsedArgs) error {
 	}
 
 	// Çalışır duruma gelmesini bekle ve adresi söyle.
-	fmt.Println(T("→ waiting for the app to come up", "→ uygulamanın ayağa kalkması bekleniyor"))
+	fmt.Println(T("→ waiting for the app to come up"))
 	for i := 0; i < 30; i++ {
 		show, err := requestJSON(http.MethodGet,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID), nil)
@@ -354,16 +354,16 @@ func cmdDeploy(args parsedArgs) error {
 			domain = fallbackDomain
 		}
 		if status == "running" && domain != "" {
-			fmt.Printf(T("\n✓ LIVE: https://%s\n", "\n✓ CANLI: https://%s\n"), domain)
+			fmt.Printf(T("\n✓ LIVE: https://%s\n"), domain)
 			return nil
 		}
 		if status == "running" {
-			fmt.Println("\n✓ CANLI — adres icin: cdnctl container apps show --app " + appUUID)
+			fmt.Println(T("\n✓ LIVE — for the address: cdnctl container apps show --app ") + appUUID)
 			return nil
 		}
 		time.Sleep(10 * time.Second)
 	}
-	fmt.Println(T("The app is not running yet — follow its state: cdnctl container apps show --app ", "Uygulama henüz running olmadı — durumu izleyin: cdnctl container apps show --app ") + appUUID)
+	fmt.Println(T("The app is not running yet — follow its state: cdnctl container apps show --app ") + appUUID)
 	return errExit(1)
 }
 
@@ -373,7 +373,7 @@ func requiredAccount(args parsedArgs) string {
 	}
 	cfg := readConfig()
 	if cfg.Account != "" {
-		fmt.Printf(T("(saved account: %s)\n", "(kayıtlı hesap: %s)\n"), cfg.Account)
+		fmt.Printf(T("(saved account: %s)\n"), cfg.Account)
 		return cfg.Account
 	}
 	fmt.Fprintln(os.Stderr, "--account gerekli (ya da: cdnctl accounts use <uuid>)")

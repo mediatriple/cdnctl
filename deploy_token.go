@@ -32,11 +32,11 @@ func cmdDeployToken(args parsedArgs) error {
 			return err
 		}
 		if token, _ := resp["token"].(string); token != "" {
-			fmt.Println(T("Deploy token (shown ONCE — save it now):", "Deploy token (BİR KEZ gösterilir — şimdi kaydedin):"))
+			fmt.Println(T("Deploy token (shown ONCE — save it now):"))
 			fmt.Println("  " + token)
 			fmt.Println()
-			fmt.Println(T("To hand it to an agent: cdnctl configure --endpoint ", "Agent'a vermek için: cdnctl configure --endpoint ") + readConfig().Endpoint + " --token " + token)
-			fmt.Println(T("Scope: deploy only (source upload/build + app lifecycle).", "Kapsam: yalnız deploy (kaynak yükle/build + uygulama yaşam döngüsü)."))
+			fmt.Println(T("To hand it to an agent: cdnctl configure --endpoint ") + readConfig().Endpoint + " --token " + token)
+			fmt.Println(T("Scope: deploy only (source upload/build + app lifecycle)."))
 			return nil
 		}
 		return printJSONValue(resp)
@@ -46,12 +46,12 @@ func cmdDeployToken(args parsedArgs) error {
 	case "revoke":
 		id := option(args, "id", "")
 		if id == "" {
-			fmt.Fprintln(os.Stderr, T("--id is required (see cdnctl deploy-token list)", "--id gerekli (cdnctl deploy-token list ile görün)"))
+			fmt.Fprintln(os.Stderr, T("--id is required (see cdnctl deploy-token list)"))
 			return errExit(2)
 		}
 		return printRequest(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/deploy-tokens/%s/revoke", account, id), map[string]any{})
 	}
-	fmt.Fprintln(os.Stderr, T("usage: cdnctl deploy-token create|list|revoke", "kullanım: cdnctl deploy-token create|list|revoke"))
+	fmt.Fprintln(os.Stderr, T("usage: cdnctl deploy-token create|list|revoke"))
 	return errExit(2)
 }

@@ -26,12 +26,32 @@ import (
 const (
 	langEN = "en"
 	langTR = "tr"
+	langES = "es"
+	langFR = "fr"
+	langRU = "ru"
+	langAR = "ar"
+	langFA = "fa"
 )
 
 // supportedLangs is the set a user may select. Adding a language means adding
 // its code here and a third argument to the T/Tf calls — the message pairs live
 // at their call sites so a translation cannot silently go missing behind a key.
-var supportedLangs = map[string]bool{langEN: true, langTR: true}
+var supportedLangs = map[string]bool{
+	langEN: true, langTR: true, langES: true,
+	langFR: true, langRU: true, langAR: true, langFA: true,
+}
+
+// catalogs holds one map per language, keyed by the English source text.
+// English has no catalog: it is the key set itself, so it can never drift out
+// of sync with the code.
+var catalogs = map[string]map[string]string{
+	langTR: messagesTR,
+	langES: messagesES,
+	langFR: messagesFR,
+	langRU: messagesRU,
+	langAR: messagesAR,
+	langFA: messagesFA,
+}
 
 // langOverride is set from --lang before any message is printed.
 var langOverride string
@@ -75,10 +95,19 @@ func normalizeLang(raw string) string {
 	return ""
 }
 
-// T picks the message for the active language.
-func T(en, tr string) string {
-	if resolveLang() == langTR {
-		return tr
+// T returns the message for the active language, keyed by the English text.
+//
+// English is the key set rather than a catalog, so a message that exists in the
+// code always has a usable form. An untranslated key falls back to English —
+// visibly imperfect, never blank or missing — and the completeness test turns
+// that gap into a build failure long before a user meets it.
+func T(en string) string {
+	lang := resolveLang()
+	if lang == langEN {
+		return en
+	}
+	if translated, ok := catalogs[lang][en]; ok && translated != "" {
+		return translated
 	}
 	return en
 }
@@ -123,21 +152,25 @@ func maybeAskLanguageOnce(command string, args parsedArgs) {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Dil / Language")
-	fmt.Fprintln(os.Stderr, "  1) Türkçe")
-	fmt.Fprintln(os.Stderr, "  2) English")
-	fmt.Fprintf(os.Stderr, "Seçiminiz / Your choice [1-2] (Enter = %s): ", suggested)
+	// Every option is written in its own language: someone who reads only Farsi
+	// should not have to recognise the English word "Persian" to find it.
+	fmt.Fprintln(os.Stderr, "Dil / Language / Idioma / Langue / Язык / اللغة / زبان")
+	for i, option := range languageMenu {
+		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, option.label)
+	}
+	fmt.Fprintf(os.Stderr, "[1-%d] (Enter = %s): ", len(languageMenu), suggested)
 
 	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && strings.TrimSpace(answer) == "" {
 		return // no answer available after all; stay with the resolved language
 	}
 	chosen := suggested
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "1", "tr", "türkçe", "turkce":
-		chosen = langTR
-	case "2", "en", "english", "ingilizce":
-		chosen = langEN
+	reply := strings.ToLower(strings.TrimSpace(answer))
+	for i, option := range languageMenu {
+		if reply == fmt.Sprint(i+1) || reply == option.code {
+			chosen = option.code
+			break
+		}
 	}
 
 	cfg := readConfig()
@@ -147,8 +180,7 @@ func maybeAskLanguageOnce(command string, args parsedArgs) {
 		// run rather than failing the command the person actually asked for.
 		langOverride = chosen
 	}
-	fmt.Fprintln(os.Stderr, T("Language set to English. Change it any time: cdnctl configure --lang tr",
-		"Dil Türkçe olarak ayarlandı. İstediğiniz zaman değiştirin: cdnctl configure --lang en"))
+	fmt.Fprintln(os.Stderr, T("Language saved. Change it any time: cdnctl configure --lang <code>"))
 	fmt.Fprintln(os.Stderr)
 }
 
@@ -161,4 +193,39 @@ func isInteractive() bool {
 		}
 	}
 	return true
+}
+
+// languageMenu is the first-run choice, each option labelled in its own
+// language and ordered to match the site's locale list.
+var languageMenu = []struct {
+	code  string
+	label string
+}{
+	{langTR, "Türkçe"},
+	{langEN, "English"},
+	{langES, "Español"},
+	{langFR, "Français"},
+	{langRU, "Русский"},
+	{langAR, "العربية"},
+	{langFA, "فارسی"},
+}
+
+// affirmatives are the answers that mean yes, in every language cdnctl offers
+// plus English. Asking "Sobrescribir?" in Spanish while only accepting "yes"
+// or "evet" turns a deliberate confirmation into a silent cancellation, so the
+// whole set is accepted regardless of the display language — someone typing
+// "yes" at a Turkish prompt is being just as clear as someone typing "evet".
+var affirmatives = map[string]bool{
+	"y": true, "yes": true,
+	"e": true, "evet": true, // tr
+	"s": true, "si": true, "sí": true, // es
+	"o": true, "oui": true, // fr
+	"d": true, "da": true, "да": true, // ru
+	"n'am": true, "نعم": true, // ar
+	"bale": true, "بله": true, // fa
+}
+
+// isAffirmative reports whether an answer to a yes/no prompt means yes.
+func isAffirmative(answer string) bool {
+	return affirmatives[strings.ToLower(strings.TrimSpace(answer))]
 }

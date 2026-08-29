@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -355,9 +356,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0191(t *testing.T) {
-	if version != "0.19.1" {
-		t.Fatalf("expected version 0.19.1, got %s", version)
+func TestVersionIs0200(t *testing.T) {
+	if version != "0.20.0" {
+		t.Fatalf("expected version 0.20.0, got %s", version)
 	}
 }
 
@@ -1150,35 +1151,140 @@ func TestLanguageResolutionOrder(t *testing.T) {
 	}
 }
 
+// A language we offer must be a language we actually have. English is the key
+// set, so every other catalogue has to cover it completely — a gap would fall
+// back to English silently, which is how a "supported" language quietly becomes
+// half-English in front of the person who chose it.
+func TestEveryLanguageTranslatesEveryMessage(t *testing.T) {
+	keys := collectMessageKeys(t)
+	if len(keys) < 50 {
+		t.Fatalf("only %d message keys found — the extractor is broken, not the catalogues", len(keys))
+	}
+
+	for lang := range supportedLangs {
+		if lang == langEN {
+			continue
+		}
+		catalogue, ok := catalogs[lang]
+		if !ok {
+			t.Errorf("%s is offered in the menu but has no catalogue", lang)
+			continue
+		}
+		var missing []string
+		for _, key := range keys {
+			if strings.TrimSpace(catalogue[key]) == "" {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			t.Errorf("%s is missing %d of %d messages, first: %q", lang, len(missing), len(keys), missing[0])
+		}
+		for key := range catalogue {
+			if !contains(keys, key) {
+				t.Errorf("%s translates %q, which no longer exists in the code", lang, key)
+			}
+		}
+	}
+}
+
+// Format verbs are positional: a translation that drops %s or reorders %s and
+// %d does not misspell anything, it prints the wrong values or garbage.
+func TestTranslationsKeepFormatVerbs(t *testing.T) {
+	verb := regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z]`)
+	for lang, catalogue := range catalogs {
+		for key, translated := range catalogue {
+			want := verb.FindAllString(key, -1)
+			got := verb.FindAllString(translated, -1)
+			if len(want) != len(got) {
+				t.Errorf("%s: %q has %v, translation has %v", lang, key, want, got)
+				continue
+			}
+			for i := range want {
+				if want[i] != got[i] {
+					t.Errorf("%s: verb %d differs for %q: %s vs %s", lang, i, key, want[i], got[i])
+				}
+			}
+		}
+	}
+}
+
 // Only explanations are translated. A command inside a message is something the
 // reader has to type, so it must survive translation character for character —
 // a localised `cdnctl deploy` would be untypeable, and the documentation
 // contract test would have nothing stable to check against.
 func TestTranslationsNeverAlterCommands(t *testing.T) {
-	previous := langOverride
-	defer func() { langOverride = previous }()
-
-	sources := []string{"init_check.go", "deploy.go", "deploy_token.go", "mcp.go"}
-	pair := regexp.MustCompile(`(?s)T\("((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)"\)`)
 	command := regexp.MustCompile("`(cdnctl [^`]+)`")
-
-	for _, file := range sources {
-		for _, match := range pair.FindAllStringSubmatch(readFileForTest(t, file), -1) {
-			english, turkish := match[1], match[2]
-			inEnglish := command.FindAllStringSubmatch(english, -1)
-			inTurkish := command.FindAllStringSubmatch(turkish, -1)
-			if len(inEnglish) != len(inTurkish) {
-				t.Errorf("%s: a message mentions %d commands in English and %d in Turkish:\n  en: %s\n  tr: %s",
-					file, len(inEnglish), len(inTurkish), english, turkish)
+	for lang, catalogue := range catalogs {
+		for key, translated := range catalogue {
+			inKey := command.FindAllStringSubmatch(key, -1)
+			inTranslation := command.FindAllStringSubmatch(translated, -1)
+			if len(inKey) != len(inTranslation) {
+				t.Errorf("%s: %q mentions %d commands, its translation %d", lang, key, len(inKey), len(inTranslation))
 				continue
 			}
-			for i := range inEnglish {
-				if inEnglish[i][1] != inTurkish[i][1] {
-					t.Errorf("%s: command translated: %q vs %q", file, inEnglish[i][1], inTurkish[i][1])
+			for i := range inKey {
+				if inKey[i][1] != inTranslation[i][1] {
+					t.Errorf("%s: command translated: %q became %q", lang, inKey[i][1], inTranslation[i][1])
 				}
 			}
 		}
 	}
+}
+
+// Leading and trailing spaces are alignment and sentence joinery, not noise:
+// several messages are fragments concatenated at runtime.
+func TestTranslationsKeepEdgeWhitespace(t *testing.T) {
+	edge := func(s string) (string, string) {
+		return s[:len(s)-len(strings.TrimLeft(s, " \n\t"))], s[len(strings.TrimRight(s, " \n\t")):]
+	}
+	for lang, catalogue := range catalogs {
+		for key, translated := range catalogue {
+			wantLead, wantTrail := edge(key)
+			gotLead, gotTrail := edge(translated)
+			if wantLead != gotLead || wantTrail != gotTrail {
+				t.Errorf("%s: whitespace differs for %q (lead %q vs %q, trail %q vs %q)",
+					lang, key, wantLead, gotLead, wantTrail, gotTrail)
+			}
+		}
+	}
+}
+
+// collectMessageKeys reads the T("...") calls out of the source: the code is the
+// authority on which messages exist, not any catalogue.
+func collectMessageKeys(t *testing.T) []string {
+	t.Helper()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := regexp.MustCompile(`T\("((?:[^"\\]|\\.)*)"\)`)
+	seen := map[string]bool{}
+	var keys []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") || strings.HasPrefix(file, "lang_") {
+			continue
+		}
+		for _, match := range call.FindAllStringSubmatch(readFileForTest(t, file), -1) {
+			key, err := strconv.Unquote(`"` + match[1] + `"`)
+			if err != nil {
+				continue
+			}
+			if !seen[key] {
+				seen[key] = true
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, item := range haystack {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // Every config field must survive a write/read round trip. Lang was written to

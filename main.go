@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.19.1"
+var version = "0.20.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -143,7 +143,8 @@ Usage:
                  command; with --yes on Homebrew cdnctl runs brew upgrade itself)
                 (refuses to move to an older published version unless --allow-downgrade is given)
   cdnctl configure --endpoint https://cdn.com.tr --token <token>
-  cdnctl configure --lang en|tr     (language of explanations; commands and flags never change)
+  cdnctl configure --lang tr|en|es|fr|ru|ar|fa
+                (language of explanations; commands and flags never change)
   cdnctl accounts list              (full JSON for every account)
   cdnctl accounts ls                (compact list: uuid, domain, type)
   cdnctl accounts use <uuid>        (save a default account; --account is optional afterwards)
@@ -290,7 +291,7 @@ func cmdConfigure(args parsedArgs) error {
 	if value, ok := args.Options["lang"]; ok && value != "" && value != "true" {
 		lang := normalizeLang(value)
 		if lang == "" {
-			return fmt.Errorf("unsupported --lang %q (supported: en, tr)", value)
+			return fmt.Errorf("unsupported --lang %q (supported: tr, en, es, fr, ru, ar, fa)", value)
 		}
 		cfg.Lang = lang
 	}
