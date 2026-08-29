@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.19.0"
+var version = "0.19.1"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -82,6 +82,7 @@ func run(args []string) error {
 	if value, ok := parsed.Options["lang"]; ok {
 		langOverride = value
 	}
+	maybeAskLanguageOnce(command, parsed)
 
 	switch command {
 	case "configure":
@@ -2076,6 +2077,9 @@ func readConfig() config {
 			}
 			if cfg.Email == "" && fileCfg.Email != "" {
 				cfg.Email = fileCfg.Email
+			}
+			if cfg.Lang == "" && fileCfg.Lang != "" {
+				cfg.Lang = fileCfg.Lang
 			}
 		}
 	}

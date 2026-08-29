@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -79,4 +81,84 @@ func T(en, tr string) string {
 		return tr
 	}
 	return en
+}
+
+// maybeAskLanguageOnce offers the language choice the first time a person uses
+// cdnctl from a terminal. A setting nobody knows about is a setting nobody uses,
+// and the people most likely to want Turkish are the least likely to go looking
+// for an English flag that would tell them it exists.
+//
+// It asks at most once — the answer is saved — and only when all of these hold:
+// the language was not already decided (flag, environment, config), both ends of
+// the terminal are real, and the command is not one whose output a machine
+// parses. Getting any of that wrong turns a helpful question into a corrupted
+// MCP stream or a CI job blocked forever on a prompt nobody can answer, so the
+// default in every uncertain case is to stay silent and use the resolved
+// language.
+func maybeAskLanguageOnce(command string, args parsedArgs) {
+	if langOverride != "" || os.Getenv("CDNCTL_LANG") != "" || readConfig().Lang != "" {
+		return
+	}
+	// mcp speaks JSON-RPC on stdio and --json means a program is reading; both
+	// would be broken by a question. version/help are one-shot and not worth
+	// interrupting, and configure is where someone sets this deliberately.
+	switch command {
+	case "mcp", "version", "--version", "help", "--help", "configure":
+		return
+	}
+	if args.Bools["json"] || os.Getenv("CI") != "" {
+		return
+	}
+	if !isInteractive() {
+		return
+	}
+
+	// The question is bilingual because at this point we do not yet know which
+	// language the reader has.
+	suggested := langEN
+	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if lang := normalizeLang(os.Getenv(key)); lang != "" {
+			suggested = lang
+			break
+		}
+	}
+
+	fmt.Fprintln(os.Stderr, "Dil / Language")
+	fmt.Fprintln(os.Stderr, "  1) Türkçe")
+	fmt.Fprintln(os.Stderr, "  2) English")
+	fmt.Fprintf(os.Stderr, "Seçiminiz / Your choice [1-2] (Enter = %s): ", suggested)
+
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && strings.TrimSpace(answer) == "" {
+		return // no answer available after all; stay with the resolved language
+	}
+	chosen := suggested
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "1", "tr", "türkçe", "turkce":
+		chosen = langTR
+	case "2", "en", "english", "ingilizce":
+		chosen = langEN
+	}
+
+	cfg := readConfig()
+	cfg.Lang = chosen
+	if err := writeConfig(cfg); err != nil {
+		// Saving is a convenience, not a requirement: honour the choice for this
+		// run rather than failing the command the person actually asked for.
+		langOverride = chosen
+	}
+	fmt.Fprintln(os.Stderr, T("Language set to English. Change it any time: cdnctl configure --lang tr",
+		"Dil Türkçe olarak ayarlandı. İstediğiniz zaman değiştirin: cdnctl configure --lang en"))
+	fmt.Fprintln(os.Stderr)
+}
+
+// isInteractive reports whether there is a person on both ends of this session.
+func isInteractive() bool {
+	for _, file := range []*os.File{os.Stdin, os.Stderr} {
+		info, err := file.Stat()
+		if err != nil || (info.Mode()&os.ModeCharDevice) == 0 {
+			return false
+		}
+	}
+	return true
 }

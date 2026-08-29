@@ -355,9 +355,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0190(t *testing.T) {
-	if version != "0.19.0" {
-		t.Fatalf("expected version 0.19.0, got %s", version)
+func TestVersionIs0191(t *testing.T) {
+	if version != "0.19.1" {
+		t.Fatalf("expected version 0.19.1, got %s", version)
 	}
 }
 
@@ -1178,5 +1178,46 @@ func TestTranslationsNeverAlterCommands(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Every config field must survive a write/read round trip. Lang was written to
+// the file and never read back, so the first-run language question returned on
+// every command and the choice appeared not to take: the field was added to the
+// struct and to writeConfig, and the one line that copies it back in readConfig
+// was missed.
+func TestConfigFieldsRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, key := range []string{"CDN_ENDPOINT", "CDNCTL_ENDPOINT", "CDN_ACCESS_TOKEN", "CDNCTL_TOKEN", "CDN_ACCOUNT"} {
+		t.Setenv(key, "")
+	}
+
+	written := config{
+		Endpoint: "https://example.test",
+		Token:    "t0ken",
+		Account:  "acc-uuid",
+		Email:    "someone@example.test",
+		Lang:     langTR,
+	}
+	if err := writeConfig(written); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+
+	got := readConfig()
+	if got.Endpoint != written.Endpoint {
+		t.Errorf("Endpoint = %q, want %q", got.Endpoint, written.Endpoint)
+	}
+	if got.Token != written.Token {
+		t.Errorf("Token = %q, want %q", got.Token, written.Token)
+	}
+	if got.Account != written.Account {
+		t.Errorf("Account = %q, want %q", got.Account, written.Account)
+	}
+	if got.Email != written.Email {
+		t.Errorf("Email = %q, want %q", got.Email, written.Email)
+	}
+	if got.Lang != written.Lang {
+		t.Errorf("Lang = %q, want %q — a saved language that cannot be read back re-asks on every command", got.Lang, written.Lang)
 	}
 }
