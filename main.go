@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.21.2"
+var version = "0.22.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -132,8 +132,9 @@ func usage(w io.Writer) {
 	fmt.Fprintf(w, `cdnctl %s
 
 Usage:
-  cdnctl login [--email user@example.com] [--password <password>] [--endpoint https://cdn.com.tr]
-                (omit --email/--password to be prompted; password input is hidden and never enters shell history)
+  cdnctl login                      (browser sign-in: reuses your session, registration included;
+                                     the account approves this terminal — no password typed here)
+  cdnctl login --email user@example.com --password <password>   (script/CI path; --password-login forces it)
   cdnctl whoami                     (show endpoint, logged-in user, and selected account; alias: status)
   cdnctl version                    (print the installed version; alias: --version)
   cdnctl logout                     (forget the saved token, default account, and email; keeps the endpoint)
@@ -311,6 +312,12 @@ func cmdLogin(args parsedArgs) error {
 	cfg := readConfig()
 	if value, ok := args.Options["endpoint"]; ok && value != "" {
 		cfg.Endpoint = value
+	}
+	// A person at a terminal gets the browser flow: existing session reused,
+	// registration possible, no password typed into a CLI. Scripts and CI keep
+	// the credential path (--email/--password, or --password-login to force it).
+	if deviceLoginPossible(args) {
+		return cmdDeviceLogin(cfg)
 	}
 	email := requiredOrPrompt(args, "email", "Email", false)
 	payload := map[string]any{

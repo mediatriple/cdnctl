@@ -1058,7 +1058,7 @@ func cmdInit(args parsedArgs) error {
 	switch {
 	case !report.Entitlement.LoggedIn:
 		report.NextSteps = append(report.NextSteps,
-			T("cdnctl login  (no account yet? sign up and buy a package: ")+buyNowURL(cfg.Endpoint)+T(" — payment finishes in the browser, then run `cdnctl init` again and it resumes)"))
+			T("`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards."))
 	case !report.Entitlement.PlatformEnabled:
 		report.NextSteps = append(report.NextSteps,
 			T("A package that includes the container platform is required: ")+buyNowURL(cfg.Endpoint)+T(" (payment in the browser; then `cdnctl init` again — it continues)"))
