@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.18.5"
+var version = "0.18.6"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -966,6 +966,11 @@ func cmdAccounts(args parsedArgs) error {
 		}
 		fmt.Printf("Saved default account: %s\n", cfg.Account)
 		fmt.Println("Account-scoped commands now use it automatically (override any time with --account).")
+		// Switching accounts is almost always a step inside a larger task — most
+		// often "init told me this account cannot deploy, use another one". Saying
+		// only what was saved leaves the person exactly where they were stuck, so
+		// when the working directory is a project, say what to run next.
+		printAccountSwitchNextStep(".")
 		return nil
 	case "current":
 		if account := readConfig().Account; account != "" {

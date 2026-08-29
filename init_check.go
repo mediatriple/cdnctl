@@ -675,6 +675,36 @@ func setManifestValue(dir, key, value string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
+// printAccountSwitchNextStep continues the sentence `cdnctl accounts use`
+// starts. Outside a project folder there is nothing useful to say, so it stays
+// quiet; inside one it answers the question the switch was made to answer —
+// can this account deploy, and what do I run now.
+func printAccountSwitchNextStep(dir string) {
+	project := detectProject(dir)
+	hasManifest := readManifestValue(dir, "name") != ""
+	if project.Language == "unknown" && !hasManifest {
+		return
+	}
+
+	ent := checkEntitlement()
+	switch {
+	case !ent.LoggedIn:
+		return
+	case !ent.PlatformEnabled:
+		fmt.Println()
+		fmt.Println("→ Bu hesapta container platformu içeren paket yok. `cdnctl init` ayrıntıyı ve seçenekleri gösterir.")
+	case !ent.PlatformActive:
+		fmt.Println()
+		fmt.Println("→ Bu hesapta da container platformu aktif değil. `cdnctl init` ile seçeneklerinize bakın.")
+	case hasManifest:
+		fmt.Println()
+		fmt.Printf("✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl deploy`\n", ent.PackageName)
+	default:
+		fmt.Println()
+		fmt.Printf("✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl init`\n", ent.PackageName)
+	}
+}
+
 // ---------- entitlement ----------
 
 type entitlementState struct {

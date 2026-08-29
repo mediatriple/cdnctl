@@ -454,3 +454,50 @@ func TestManifestValuesAreReadableAndWritable(t *testing.T) {
 		t.Errorf("updating app duplicated the key:\n%s", body)
 	}
 }
+
+// The last line of a successful deploy must contain the address. The API never
+// returns a plain "domain" key — it reports public_subdomain and domains lists —
+// so the lookup came back empty and the flow ended by telling people to run
+// another command to find out where their app was.
+func TestAppDomainReadsTheShapesTheApiActuallyReturns(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload map[string]any
+		want    string
+	}{
+		{
+			name: "public_subdomain",
+			payload: map[string]any{"app": map[string]any{
+				"public_subdomain": "camap769.cdn.com.tr",
+			}},
+			want: "camap769.cdn.com.tr",
+		},
+		{
+			name: "domains list",
+			payload: map[string]any{"app": map[string]any{
+				"domains": []any{"camap769.cdn.com.tr"},
+			}},
+			want: "camap769.cdn.com.tr",
+		},
+		{
+			name: "routed_domains nested",
+			payload: map[string]any{"operation": map[string]any{"output": map[string]any{
+				"routed_domains": []any{"camap769.cdn.com.tr"},
+			}}},
+			want: "camap769.cdn.com.tr",
+		},
+		{
+			name:    "nothing to report",
+			payload: map[string]any{"app": map[string]any{"name": "x"}},
+			want:    "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appDomain(tc.payload); got != tc.want {
+				t.Errorf("appDomain = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

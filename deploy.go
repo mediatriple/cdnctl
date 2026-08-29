@@ -324,7 +324,7 @@ func cmdDeploy(args parsedArgs) error {
 		if err != nil {
 			return err
 		}
-		if d := findString(exposeResp, "domain"); d != "" {
+		if d := appDomain(exposeResp); d != "" {
 			fallbackDomain = d
 		}
 		// create app'i "stopped" bırakır: pod'u ancak deploy başlatır. (İlk canlı
@@ -347,7 +347,7 @@ func cmdDeploy(args parsedArgs) error {
 			return err
 		}
 		status := findString(show, "runtime_status")
-		domain := findString(show, "domain")
+		domain := appDomain(show)
 		if domain == "" {
 			// "running"a ilk gecen yoklamada show yaniti domaini henuz tasimayabiliyor
 			// (temiz kabul kosusunda URL bos basildi) — expose yanitindan aldigimiz yedek.
@@ -420,6 +420,43 @@ func extractAppUUID(resp map[string]any) string {
 
 // findString: iç içe map'lerde ilk eşleşen anahtar değerini bulur (API yanıt
 // şekilleri uca göre değişiyor; alan taşımak yerine anahtarla arıyoruz).
+// appDomain digs the public address out of an app response. The API never
+// returns a plain "domain" key: it reports public_subdomain plus domains /
+// routed_domains lists, so a lookup for "domain" always came back empty and the
+// last line of a successful deploy told people to go run another command to
+// find out where their app was. That is the one line the whole flow exists to
+// print.
+func appDomain(payload map[string]any) string {
+	if got := findString(payload, "public_subdomain"); got != "" {
+		return got
+	}
+	for _, key := range []string{"domains", "routed_domains"} {
+		if got := findFirstInList(payload, key); got != "" {
+			return got
+		}
+	}
+	return findString(payload, "domain")
+}
+
+// findFirstInList returns the first string of a named list anywhere in the tree.
+func findFirstInList(node map[string]any, key string) string {
+	if raw, ok := node[key].([]any); ok {
+		for _, item := range raw {
+			if text, ok := item.(string); ok && text != "" {
+				return text
+			}
+		}
+	}
+	for _, value := range node {
+		if child, ok := value.(map[string]any); ok {
+			if got := findFirstInList(child, key); got != "" {
+				return got
+			}
+		}
+	}
+	return ""
+}
+
 func findString(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
