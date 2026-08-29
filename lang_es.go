@@ -106,5 +106,6 @@ var messagesES = map[string]string{
 	"The app is not serving. What usually explains it:": "La app no está sirviendo. Lo que suele explicarlo:",
 	"unknown": "desconocido",
 	"App":     "App",
-	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "que una persona elija y pague en la página buy-now; después `cdnctl init --wait` continúa por sí solo",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself":         "que una persona elija y pague en la página buy-now; después `cdnctl init --wait` continúa por sí solo",
+	"No account selected yet — pick one: `cdnctl accounts use <uuid>` (list them: `cdnctl accounts ls`)": "Aún no hay cuenta seleccionada — elija una: `cdnctl accounts use <uuid>` (para listarlas: `cdnctl accounts ls`)",
 }

@@ -108,5 +108,6 @@ var messagesRU = map[string]string{
 	"The app is not serving. What usually explains it:": "Приложение не обслуживает запросы. Обычная причина:",
 	"unknown": "неизвестно",
 	"App":     "Приложение",
-	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "пусть человек выберет и оплатит на странице buy-now; затем `cdnctl init --wait` продолжит сам",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself":         "пусть человек выберет и оплатит на странице buy-now; затем `cdnctl init --wait` продолжит сам",
+	"No account selected yet — pick one: `cdnctl accounts use <uuid>` (list them: `cdnctl accounts ls`)": "Аккаунт ещё не выбран — выберите: `cdnctl accounts use <uuid>` (список: `cdnctl accounts ls`)",
 }

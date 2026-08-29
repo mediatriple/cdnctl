@@ -1094,6 +1094,20 @@ func cmdInit(args parsedArgs) error {
 			report.NextSteps = append(report.NextSteps,
 				T("Create a separate account for container apps and assign a package to it (panel → Accounts)."))
 		}
+	case !report.Entitlement.PlatformActive && readConfig().Account == "":
+		// Logged in with no account chosen. Nothing about the platform can be
+		// decided yet — every account-scoped check is meaningless — so ask for the
+		// account instead of reporting an activation that could not even be tried.
+		report.NextSteps = append(report.NextSteps,
+			T("No account selected yet — pick one: `cdnctl accounts use <uuid>` (list them: `cdnctl accounts ls`)"))
+		for _, acc := range report.Entitlement.ReadyAccounts {
+			label := acc.Label
+			if label == "" {
+				label = acc.UUID
+			}
+			report.NextSteps = append(report.NextSteps,
+				fmt.Sprintf(T("Ready account: %s → `cdnctl accounts use %s`"), label, acc.UUID))
+		}
 	case !report.Entitlement.PlatformActive:
 		// The package allows container apps but the platform was never activated.
 		// Do it here: it is one idempotent call, and finding out at upload time

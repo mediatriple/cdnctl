@@ -106,5 +106,6 @@ var messagesAR = map[string]string{
 	"The app is not serving. What usually explains it:": "التطبيق لا يخدم الطلبات. التفسير المعتاد:",
 	"unknown": "غير معروف",
 	"App":     "التطبيق",
-	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "دَع إنسانًا يختار ويدفع في صفحة buy-now؛ بعدها يتابع `cdnctl init --wait` من تلقاء نفسه",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself":         "دَع إنسانًا يختار ويدفع في صفحة buy-now؛ بعدها يتابع `cdnctl init --wait` من تلقاء نفسه",
+	"No account selected yet — pick one: `cdnctl accounts use <uuid>` (list them: `cdnctl accounts ls`)": "لم يُحدَّد حساب بعد — اختر واحدًا: `cdnctl accounts use <uuid>` (لعرض القائمة: `cdnctl accounts ls`)",
 }

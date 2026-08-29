@@ -106,5 +106,6 @@ var messagesFA = map[string]string{
 	"The app is not serving. What usually explains it:": "برنامه پاسخ نمی‌دهد. توضیح رایج آن:",
 	"unknown": "نامشخص",
 	"App":     "برنامه",
-	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "بگذارید یک انسان در صفحه buy-now انتخاب و پرداخت کند؛ سپس `cdnctl init --wait` خودش ادامه می‌دهد",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself":         "بگذارید یک انسان در صفحه buy-now انتخاب و پرداخت کند؛ سپس `cdnctl init --wait` خودش ادامه می‌دهد",
+	"No account selected yet — pick one: `cdnctl accounts use <uuid>` (list them: `cdnctl accounts ls`)": "هنوز حسابی انتخاب نشده — یکی را انتخاب کنید: `cdnctl accounts use <uuid>` (برای فهرست: `cdnctl accounts ls`)",
 }

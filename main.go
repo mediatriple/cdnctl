@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.21.1"
+var version = "0.21.2"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -352,16 +352,47 @@ func cmdLogin(args parsedArgs) error {
 // from CDN_ACCESS_TOKEN/CDNCTL_TOKEN in the environment is never written into
 // the file; that env token is out of our reach, so we point it out instead.
 func cmdLogout(_ parsedArgs) error {
-	var cfg config
-	if data, err := os.ReadFile(configPath()); err == nil {
-		_ = json.Unmarshal(data, &cfg)
+	// Clear every file readConfig() reads, not just the one writeConfig() writes.
+	// Credentials left in the legacy ~/.cdnctl/config.json survived logout, so the
+	// CLI printed "Logged out" and the very next command was still authenticated —
+	// the worst possible failure for a command whose entire job is to end a session.
+	hadToken := false
+	for _, path := range []string{configPath(), legacyConfigPath()} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var stored config
+		if json.Unmarshal(data, &stored) != nil {
+			continue
+		}
+		if stored.Token != "" {
+			hadToken = true
+		}
+		stored.Token = ""
+		stored.Account = ""
+		stored.Email = ""
+		cleaned, err := marshalIndentNoHTMLEscape(stored)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, append(cleaned, '\n'), 0o600); err != nil {
+			return err
+		}
 	}
-	hadToken := cfg.Token != ""
+	// The config file may not exist at all; make sure the primary one does, so a
+	// later login has somewhere to write.
+	cfg := readConfig()
 	cfg.Token = ""
 	cfg.Account = ""
 	cfg.Email = ""
 	if err := writeConfig(cfg); err != nil {
 		return err
+	}
+	// Say it only if it is true: read the state back the way every other command
+	// will read it.
+	if remaining := readConfig(); remaining.Token != "" {
+		fmt.Fprintln(os.Stderr, "Warning: a token is still active after logout — check CDN_ACCESS_TOKEN/CDNCTL_TOKEN and "+configPath())
 	}
 	if os.Getenv("CDN_ACCESS_TOKEN") != "" || os.Getenv("CDNCTL_TOKEN") != "" {
 		fmt.Fprintln(os.Stderr, "Note: a token is still set via CDN_ACCESS_TOKEN/CDNCTL_TOKEN; unset it to fully log out.")

@@ -356,9 +356,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0211(t *testing.T) {
-	if version != "0.21.1" {
-		t.Fatalf("expected version 0.21.1, got %s", version)
+func TestVersionIs0212(t *testing.T) {
+	if version != "0.21.2" {
+		t.Fatalf("expected version 0.21.2, got %s", version)
 	}
 }
 
@@ -1325,5 +1325,44 @@ func TestConfigFieldsRoundTrip(t *testing.T) {
 	}
 	if got.Lang != written.Lang {
 		t.Errorf("Lang = %q, want %q — a saved language that cannot be read back re-asks on every command", got.Lang, written.Lang)
+	}
+}
+
+// Logout must end the session everywhere the CLI looks for one. Clearing only
+// the file writeConfig() writes left credentials in the legacy
+// ~/.cdnctl/config.json, so logout printed "Logged out" and the very next
+// command was still authenticated — the worst possible outcome for a command
+// whose whole job is to end a session.
+func TestLogoutClearsEveryConfigSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, key := range []string{"CDN_ACCESS_TOKEN", "CDNCTL_TOKEN", "CDN_ACCOUNT", "CDN_ENDPOINT", "CDNCTL_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+
+	write := func(path, body string) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(configPath(), `{"endpoint":"https://cdn.com.tr","token":"current","email":"a@b.c","account":"acc"}`)
+	write(legacyConfigPath(), `{"endpoint":"https://cdn.com.tr","token":"legacy","email":"old@b.c"}`)
+
+	if _, err := captureStdout(func() error { return cmdLogout(parsedArgs{}) }); err != nil {
+		t.Fatalf("cmdLogout: %v", err)
+	}
+
+	after := readConfig()
+	if after.Token != "" {
+		t.Errorf("token survived logout: %q", after.Token)
+	}
+	if after.Email != "" {
+		t.Errorf("email survived logout: %q", after.Email)
+	}
+	if after.Account != "" {
+		t.Errorf("account survived logout: %q", after.Account)
 	}
 }
