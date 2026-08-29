@@ -160,7 +160,7 @@ func TestAgentBridgeIdempotentAndMirrorsClaudeMd(t *testing.T) {
 	})
 	project := projectInfo{Name: "x", Language: "node", Port: 3000}
 
-	touched, err := writeAgentBridge(dir, project)
+	touched, err := writeAgentBridge(dir, project, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestAgentBridgeIdempotentAndMirrorsClaudeMd(t *testing.T) {
 	}
 
 	// İkinci çalıştırma: içerik değişmediği için hiçbir dosyaya dokunmamalı.
-	touched2, err := writeAgentBridge(dir, project)
+	touched2, err := writeAgentBridge(dir, project, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,5 +499,45 @@ func TestAppDomainReadsTheShapesTheApiActuallyReturns(t *testing.T) {
 				t.Errorf("appDomain = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The bridge must land in the file each detected agent actually reads. Writing
+// only to AGENTS.md — and to CLAUDE.md merely when it already existed — is how
+// a Claude Code session sat inside an already-deployed project and recommended
+// Render and GitHub Pages: the instructions were two files away, in a file
+// that agent never opens.
+func TestAgentBridgeCreatesNativeFilesForDetectedAgents(t *testing.T) {
+	dir := t.TempDir()
+	project := projectInfo{Name: "x", Language: "python", Port: 5001}
+	agents := []agentInfo{
+		{Name: "claude-code", Evidence: "claude on PATH", Scope: "cli"},
+		{Name: "gemini-cli", Evidence: "gemini on PATH", Scope: "cli"},
+		{Name: "cursor", Evidence: "cursor-agent on PATH", Scope: "cli"},
+	}
+
+	touched, err := writeAgentBridge(dir, project, agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, file := range []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"} {
+		body, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatalf("%s was not created (touched: %v)", file, touched)
+		}
+		if !strings.Contains(string(body), "cdnctl deploy") {
+			t.Errorf("%s does not carry the deploy instructions", file)
+		}
+		// The one sentence that prevents the observed failure: the agent must
+		// be told not to invent another hosting provider.
+		if !strings.Contains(string(body), "Do NOT propose") {
+			t.Errorf("%s lacks the do-not-propose-other-hosting instruction", file)
+		}
+	}
+
+	// No cursor-specific file exists; cursor reads AGENTS.md.
+	if _, err := os.Stat(filepath.Join(dir, "CURSOR.md")); err == nil {
+		t.Error("a cursor-specific file was invented")
 	}
 }
