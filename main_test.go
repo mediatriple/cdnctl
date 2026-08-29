@@ -355,9 +355,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0186(t *testing.T) {
-	if version != "0.18.6" {
-		t.Fatalf("expected version 0.18.6, got %s", version)
+func TestVersionIs0190(t *testing.T) {
+	if version != "0.19.0" {
+		t.Fatalf("expected version 0.19.0, got %s", version)
 	}
 }
 
@@ -1110,4 +1110,73 @@ func readFileForTest(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(raw)
+}
+
+// Language resolution: most specific source wins, English when nothing says
+// otherwise, and an unrecognised locale must fall through rather than pin the
+// output to a language we do not have.
+func TestLanguageResolutionOrder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // do not read the developer's real config
+	cases := []struct {
+		name     string
+		override string
+		env      map[string]string
+		want     string
+	}{
+		{name: "default is english", want: langEN},
+		{name: "os locale", env: map[string]string{"LANG": "tr_TR.UTF-8"}, want: langTR},
+		{name: "CDNCTL_LANG beats os locale", env: map[string]string{"LANG": "tr_TR.UTF-8", "CDNCTL_LANG": "en"}, want: langEN},
+		{name: "flag beats everything", override: "tr", env: map[string]string{"LANG": "en_US.UTF-8", "CDNCTL_LANG": "en"}, want: langTR},
+		{name: "unknown locale falls through", env: map[string]string{"LANG": "de_DE.UTF-8"}, want: langEN},
+		{name: "unknown CDNCTL_LANG falls through to locale", env: map[string]string{"CDNCTL_LANG": "klingon", "LANG": "tr_TR.UTF-8"}, want: langTR},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANG", "CDNCTL_LANG"} {
+				t.Setenv(key, "")
+			}
+			for key, value := range tc.env {
+				t.Setenv(key, value)
+			}
+			previous := langOverride
+			langOverride = tc.override
+			defer func() { langOverride = previous }()
+
+			if got := resolveLang(); got != tc.want {
+				t.Errorf("resolveLang() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Only explanations are translated. A command inside a message is something the
+// reader has to type, so it must survive translation character for character —
+// a localised `cdnctl deploy` would be untypeable, and the documentation
+// contract test would have nothing stable to check against.
+func TestTranslationsNeverAlterCommands(t *testing.T) {
+	previous := langOverride
+	defer func() { langOverride = previous }()
+
+	sources := []string{"init_check.go", "deploy.go", "deploy_token.go", "mcp.go"}
+	pair := regexp.MustCompile(`(?s)T\("((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)"\)`)
+	command := regexp.MustCompile("`(cdnctl [^`]+)`")
+
+	for _, file := range sources {
+		for _, match := range pair.FindAllStringSubmatch(readFileForTest(t, file), -1) {
+			english, turkish := match[1], match[2]
+			inEnglish := command.FindAllStringSubmatch(english, -1)
+			inTurkish := command.FindAllStringSubmatch(turkish, -1)
+			if len(inEnglish) != len(inTurkish) {
+				t.Errorf("%s: a message mentions %d commands in English and %d in Turkish:\n  en: %s\n  tr: %s",
+					file, len(inEnglish), len(inTurkish), english, turkish)
+				continue
+			}
+			for i := range inEnglish {
+				if inEnglish[i][1] != inTurkish[i][1] {
+					t.Errorf("%s: command translated: %q vs %q", file, inEnglish[i][1], inTurkish[i][1])
+				}
+			}
+		}
+	}
 }

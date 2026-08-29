@@ -221,7 +221,7 @@ func cmdMcp(_ parsedArgs) error {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 	out := os.Stdout
-	fmt.Fprintln(os.Stderr, "cdnctl mcp: hazır (stdio)")
+	fmt.Fprintln(os.Stderr, T("cdnctl mcp: ready (stdio)", "cdnctl mcp: hazır (stdio)"))
 
 	for in.Scan() {
 		line := bytes.TrimSpace(in.Bytes())

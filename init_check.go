@@ -278,16 +278,16 @@ func runChecks(dir string) []finding {
 		if loc := findOutsideComments(content, reListenLocalhost); loc != nil && !strings.Contains(base, "test") {
 			findings = append(findings, finding{
 				Rule: "bind-localhost", Severity: "error", File: rel(path), Line: lineOf(content, loc[0]),
-				Message: "Uygulama 127.0.0.1/localhost'a bağlanıyor — container içinde dışarıdan erişilemez, deploy edilince site açılmaz.",
-				Fix:     "0.0.0.0'a bağlanın (ör. app.listen(PORT) — host parametresini kaldırmak yeterli).",
+				Message: T("The app binds to 127.0.0.1/localhost — nothing outside the container can reach it, so the site will not open once deployed.", "Uygulama 127.0.0.1/localhost'a bağlanıyor — container içinde dışarıdan erişilemez, deploy edilince site açılmaz."),
+				Fix:     T("Bind 0.0.0.0 instead (e.g. app.listen(PORT) — dropping the host argument is enough).", "0.0.0.0'a bağlanın (ör. app.listen(PORT) — host parametresini kaldırmak yeterli)."),
 			})
 		}
 		if !isEnvExample && base != "Dockerfile" {
 			if loc := reSecretAssign.FindIndex(content); loc != nil {
 				findings = append(findings, finding{
 					Rule: "secret-in-code", Severity: "error", File: rel(path), Line: lineOf(content, loc[0]),
-					Message: "Kodda gömülü bir sır (API key/token/parola) görünüyor.",
-					Fix:     "Değeri koddan çıkarıp deploy sırasında `cdnctl container apps update --secret KEY=VALUE` ile verin; kodda process.env/os.environ ile okuyun.",
+					Message: T("A secret (API key, token or password) appears to be hard-coded.", "Kodda gömülü bir sır (API key/token/parola) görünüyor."),
+					Fix:     T("Move the value out of the code and pass it with `cdnctl container apps update --secret KEY=VALUE`; read it via process.env/os.environ.", "Değeri koddan çıkarıp deploy sırasında `cdnctl container apps update --secret KEY=VALUE` ile verin; kodda process.env/os.environ ile okuyun."),
 				})
 			}
 		}
@@ -315,22 +315,22 @@ func runChecks(dir string) []finding {
 	if sawSQLite {
 		findings = append(findings, finding{
 			Rule: "sqlite-single-pod", Severity: "warning",
-			Message: "SQLite kullanılıyor. Container yeniden başladığında ya da birden çok replikada dosya-veritabanı veri kaybettirir.",
-			Fix:     "Kalıcı disk bağlayın (--persistent-mount-path) ya da yönetilen MySQL/Postgres add-on'una geçin — taşımada yardımcı olur: cdn.com.tr/help/platforms.",
+			Message: T("SQLite is in use. A file database loses data when the container restarts, and cannot be shared across replicas.", "SQLite kullanılıyor. Container yeniden başladığında ya da birden çok replikada dosya-veritabanı veri kaybettirir."),
+			Fix:     T("Attach a persistent volume (--persistent-mount-path) or move to a managed MySQL/Postgres add-on — migration help: cdn.com.tr/help/platforms.", "Kalıcı disk bağlayın (--persistent-mount-path) ya da yönetilen MySQL/Postgres add-on'una geçin — taşımada yardımcı olur: cdn.com.tr/help/platforms."),
 		})
 	}
 	if !sawHealth {
 		findings = append(findings, finding{
 			Rule: "no-healthcheck", Severity: "warning",
-			Message: "Bir healthcheck yolu (/health) görünmüyor. Platform, uygulamanızın canlı olduğunu anlayamaz; çökme sonrası otomatik toparlama gecikir.",
-			Fix:     "200 dönen basit bir GET /health ekleyin ve deploy'da --healthcheck /health verin.",
+			Message: T("No healthcheck path (/health) found. The platform cannot tell whether your app is alive, so recovery after a crash is delayed.", "Bir healthcheck yolu (/health) görünmüyor. Platform, uygulamanızın canlı olduğunu anlayamaz; çökme sonrası otomatik toparlama gecikir."),
+			Fix:     T("Add a simple GET /health that returns 200, and pass --healthcheck /health on deploy.", "200 dönen basit bir GET /health ekleyin ve deploy'da --healthcheck /health verin."),
 		})
 	}
 	if sawListen && !sawPortEnv {
 		findings = append(findings, finding{
 			Rule: "hardcoded-port", Severity: "warning",
-			Message: "Port sabit yazılmış ve PORT ortam değişkeni okunmuyor.",
-			Fix:     "const PORT = process.env.PORT || <port> desenini kullanın; platform portu env ile verir.",
+			Message: T("The port is hard-coded and the PORT environment variable is ignored.", "Port sabit yazılmış ve PORT ortam değişkeni okunmuyor."),
+			Fix:     T("Use the const PORT = process.env.PORT || <port> pattern; the platform supplies the port through the environment.", "const PORT = process.env.PORT || <port> desenini kullanın; platform portu env ile verir."),
 		})
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
@@ -346,8 +346,8 @@ func runChecks(dir string) []finding {
 		if !ignored {
 			findings = append(findings, finding{
 				Rule: "env-not-ignored", Severity: "error", File: ".env",
-				Message: ".env dosyası var ama .gitignore'da değil — sırlar repoya girer.",
-				Fix:     ".gitignore'a `.env` satırı ekleyin; değerleri --secret ile taşıyın.",
+				Message: T("There is a .env file and .gitignore does not list it — secrets will land in the repository.", ".env dosyası var ama .gitignore'da değil — sırlar repoya girer."),
+				Fix:     T("Add a `.env` line to .gitignore and move the values to --secret.", ".gitignore'a `.env` satırı ekleyin; değerleri --secret ile taşıyın."),
 			})
 		}
 	}
@@ -355,7 +355,7 @@ func runChecks(dir string) []finding {
 		findings = append(findings, finding{
 			Rule: "no-dockerfile", Severity: "info",
 			Message: "Dockerfile yok.",
-			Fix:     "`cdnctl init` tespit edilen dile göre bir şablon üretebilir.",
+			Fix:     T("`cdnctl init` can write a template for the detected language.", "`cdnctl init` tespit edilen dile göre bir şablon üretebilir."),
 		})
 	} else if regexp.MustCompile(`(?m)^\s*COPY\s+\.{1,2}/?\s`).Match(raw) {
 		// Canlı çökmeden doğan kural (2026-08-25 deneyi): imaj içindeki npm install'ın
@@ -374,8 +374,8 @@ func runChecks(dir string) []finding {
 			if !ignored {
 				findings = append(findings, finding{
 					Rule: "copy-node-modules", Severity: "error", File: "Dockerfile",
-					Message: "Dockerfile'daki `COPY . .` lokal node_modules'ı imaja kopyalıyor — makinenizde derlenen native modüller container'da çalışmaz (ERR_DLOPEN_FAILED).",
-					Fix:     ".dockerignore dosyasına `node_modules` satırı ekleyin; bağımlılıklar imaj içindeki npm install ile kurulur.",
+					Message: T("`COPY . .` in the Dockerfile copies your local node_modules into the image — native modules built on your machine will not run in the container (ERR_DLOPEN_FAILED).", "Dockerfile'daki `COPY . .` lokal node_modules'ı imaja kopyalıyor — makinenizde derlenen native modüller container'da çalışmaz (ERR_DLOPEN_FAILED)."),
+					Fix:     T("Add a `node_modules` line to .dockerignore; dependencies are installed by npm install inside the image.", ".dockerignore dosyasına `node_modules` satırı ekleyin; bağımlılıklar imaj içindeki npm install ile kurulur."),
 				})
 			}
 		}
@@ -692,16 +692,16 @@ func printAccountSwitchNextStep(dir string) {
 		return
 	case !ent.PlatformEnabled:
 		fmt.Println()
-		fmt.Println("→ Bu hesapta container platformu içeren paket yok. `cdnctl init` ayrıntıyı ve seçenekleri gösterir.")
+		fmt.Println(T("→ This account has no package that includes the container platform. `cdnctl init` shows the detail and your options.", "→ Bu hesapta container platformu içeren paket yok. `cdnctl init` ayrıntıyı ve seçenekleri gösterir."))
 	case !ent.PlatformActive:
 		fmt.Println()
-		fmt.Println("→ Bu hesapta da container platformu aktif değil. `cdnctl init` ile seçeneklerinize bakın.")
+		fmt.Println(T("→ The container platform is not active on this account either. Run `cdnctl init` to see your options.", "→ Bu hesapta da container platformu aktif değil. `cdnctl init` ile seçeneklerinize bakın."))
 	case hasManifest:
 		fmt.Println()
-		fmt.Printf("✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl deploy`\n", ent.PackageName)
+		fmt.Printf(T("✓ The container platform is ready on this account (%s). Next step: `cdnctl deploy`\n", "✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl deploy`\n"), ent.PackageName)
 	default:
 		fmt.Println()
-		fmt.Printf("✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl init`\n", ent.PackageName)
+		fmt.Printf(T("✓ The container platform is ready on this account (%s). Next step: `cdnctl init`\n", "✓ Container platformu bu hesapta hazır (%s). Sıradaki adım: `cdnctl init`\n"), ent.PackageName)
 	}
 }
 
@@ -882,7 +882,7 @@ func containerPlatformActive() (bool, string) {
 		return true, ""
 	}
 	if kind != "" {
-		return false, fmt.Sprintf("bu hesapta %s platformu çalışıyor", kind)
+		return false, fmt.Sprintf(T("this account runs the %s platform", "bu hesapta %s platformu çalışıyor"), kind)
 	}
 	return false, ""
 }
@@ -893,7 +893,7 @@ func containerPlatformActive() (bool, string) {
 func activateContainerPlatform() (string, error) {
 	cfg := readConfig()
 	if cfg.Account == "" {
-		return "", fmt.Errorf("hesap seçili değil")
+		return "", fmt.Errorf(T("no account selected", "hesap seçili değil"))
 	}
 	resp, err := requestJSON(http.MethodPost, "accounts/"+cfg.Account+"/platform/enable-apps", map[string]any{})
 	if err != nil {
@@ -938,7 +938,7 @@ func openDecisions(project projectInfo, ent entitlementState, method string) []d
 	methods = append(methods, "source (coming-soon: tarball -> platform build)")
 	decisions := []decision{{
 		ID:       "deploy-method",
-		Question: "Bu proje nasıl deploy edilsin?",
+		Question: T("How should this project be deployed?", "Bu proje nasıl deploy edilsin?"),
 		Options:  methods,
 		Chosen:   method,
 		Flag:     "--method",
@@ -946,8 +946,8 @@ func openDecisions(project projectInfo, ent entitlementState, method string) []d
 	if ent.LoggedIn && !ent.PlatformEnabled {
 		decisions = append(decisions, decision{
 			ID:       "package",
-			Question: "Hesapta container platformu içeren paket yok — hangisi alınacak? (ödeme tarayıcıda, cdn.com.tr'de yapılır)",
-			Options:  []string{"buy-now sayfasındaki container-platform içeren paketlerden biri"},
+			Question: T("This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)", "Hesapta container platformu içeren paket yok — hangisi alınacak? (ödeme tarayıcıda, cdn.com.tr'de yapılır)"),
+			Options:  []string{T("one of the container-platform packages on the buy-now page", "buy-now sayfasındaki container-platform içeren paketlerden biri")},
 			Flag:     "--package",
 		})
 	}
@@ -984,21 +984,21 @@ func cmdInit(args parsedArgs) error {
 	// panel tarafına hiçbir ek uç gerekmeden (accounts list bunu zaten görüyor).
 	if args.Bools["wait"] && report.Entitlement.LoggedIn && !report.Entitlement.PlatformEnabled {
 		cfg := readConfig()
-		fmt.Println("✗ Hesapta container platformu içeren paket yok.")
-		fmt.Println("  → Satın alma: " + buyNowURL(cfg.Endpoint))
-		fmt.Println("  Ödeme tamamlanınca burada otomatik devam edeceğim (Ctrl+C ile vazgeçebilirsiniz)...")
+		fmt.Println(T("✗ This account has no package that includes the container platform.", "✗ Hesapta container platformu içeren paket yok."))
+		fmt.Println(T("  → Purchase: ", "  → Satın alma: ") + buyNowURL(cfg.Endpoint))
+		fmt.Println(T("  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...", "  Ödeme tamamlanınca burada otomatik devam edeceğim (Ctrl+C ile vazgeçebilirsiniz)..."))
 		deadline := time.Now().Add(30 * time.Minute)
 		for time.Now().Before(deadline) {
 			time.Sleep(15 * time.Second)
 			report.Entitlement = checkEntitlement()
 			if report.Entitlement.PlatformEnabled {
-				fmt.Printf("✓ Paket aktif: %s — devam ediliyor.\n\n", report.Entitlement.PackageName)
+				fmt.Printf(T("✓ Package active: %s — continuing.\n\n", "✓ Paket aktif: %s — devam ediliyor.\n\n"), report.Entitlement.PackageName)
 				break
 			}
-			fmt.Println("  ... ödeme bekleniyor")
+			fmt.Println(T("  ... waiting for payment", "  ... ödeme bekleniyor"))
 		}
 		if !report.Entitlement.PlatformEnabled {
-			fmt.Println("Zaman aşımı: ödeme görünmedi. Ödemeden sonra `cdnctl init` yeterli — kaldığı yerden sürer.")
+			fmt.Println(T("Timed out: no payment seen. After paying, `cdnctl init` is enough — it resumes where it left off.", "Zaman aşımı: ödeme görünmedi. Ödemeden sonra `cdnctl init` yeterli — kaldığı yerden sürer."))
 		}
 	}
 	report.Findings = runChecks(dir)
@@ -1031,24 +1031,24 @@ func cmdInit(args parsedArgs) error {
 	switch {
 	case !report.Entitlement.LoggedIn:
 		report.NextSteps = append(report.NextSteps,
-			"cdnctl login  (hesabınız yoksa kayıt+paket: "+buyNowURL(cfg.Endpoint)+" — ödeme tarayıcıda biter, sonra `cdnctl init` yeniden çalıştırın, kaldığı yerden sürer)")
+			T("cdnctl login  (no account yet? sign up and buy a package: ", "cdnctl login  (hesabınız yoksa kayıt+paket: ")+buyNowURL(cfg.Endpoint)+T(" — payment finishes in the browser, then run `cdnctl init` again and it resumes)", " — ödeme tarayıcıda biter, sonra `cdnctl init` yeniden çalıştırın, kaldığı yerden sürer)"))
 	case !report.Entitlement.PlatformEnabled:
 		report.NextSteps = append(report.NextSteps,
-			"Container platformu içeren paket gerekiyor: "+buyNowURL(cfg.Endpoint)+" (ödeme tarayıcıda; sonra `cdnctl init` tekrar — devam eder)")
+			T("A package that includes the container platform is required: ", "Container platformu içeren paket gerekiyor: ")+buyNowURL(cfg.Endpoint)+T(" (payment in the browser; then `cdnctl init` again — it continues)", " (ödeme tarayıcıda; sonra `cdnctl init` tekrar — devam eder)"))
 	case !report.Entitlement.PlatformActive && report.Entitlement.ActivateBlock != "":
 		// A different platform type already owns this account; that is a decision
 		// for a human, not something the CLI should silently rearrange. Dead-ending
 		// there is not enough though — the way out is usually already paid for, so
 		// list it.
 		report.NextSteps = append(report.NextSteps,
-			"Container app'ler bu hesapta kullanılamıyor: "+report.Entitlement.ActivateBlock+" — bir hesap tek platform tipi çalıştırır.")
+			T("Container apps are not available on this account: ", "Container app'ler bu hesapta kullanılamıyor: ")+report.Entitlement.ActivateBlock+T(" — an account runs a single platform type.", " — bir hesap tek platform tipi çalıştırır."))
 		for _, acc := range report.Entitlement.ReadyAccounts {
 			label := acc.Label
 			if label == "" {
 				label = acc.UUID
 			}
 			report.NextSteps = append(report.NextSteps,
-				fmt.Sprintf("Hazır hesap: %s → `cdnctl accounts use %s`", label, acc.UUID))
+				fmt.Sprintf(T("Ready account: %s → `cdnctl accounts use %s`", "Hazır hesap: %s → `cdnctl accounts use %s`"), label, acc.UUID))
 		}
 		if len(report.Entitlement.SparePackages) > 0 {
 			names := []string{}
@@ -1060,12 +1060,12 @@ func cmdInit(args parsedArgs) error {
 				}
 			}
 			report.NextSteps = append(report.NextSteps,
-				fmt.Sprintf("Hesabınıza atanmamış %d paket var: %s — panelden yeni bir hesaba atayın, sonra `cdnctl accounts use <uuid>`. Yeni satın alma gerekmez.",
+				fmt.Sprintf(T("You own %d package(s) not assigned to any account: %s — assign one to a new account in the panel, then `cdnctl accounts use <uuid>`. No new purchase needed.", "Hesabınıza atanmamış %d paket var: %s — panelden yeni bir hesaba atayın, sonra `cdnctl accounts use <uuid>`. Yeni satın alma gerekmez."),
 					len(names), strings.Join(names, ", ")))
 		}
 		if len(report.Entitlement.ReadyAccounts) == 0 && len(report.Entitlement.SparePackages) == 0 {
 			report.NextSteps = append(report.NextSteps,
-				"Container app'ler için ayrı bir hesap açıp paket atayın (panel → Hesaplar).")
+				T("Create a separate account for container apps and assign a package to it (panel → Accounts).", "Container app'ler için ayrı bir hesap açıp paket atayın (panel → Hesaplar)."))
 		}
 	case !report.Entitlement.PlatformActive:
 		// The package allows container apps but the platform was never activated.
@@ -1073,19 +1073,19 @@ func cmdInit(args parsedArgs) error {
 		// (409, mid-deploy) is exactly the dead-end this command exists to avoid.
 		if msg, err := activateContainerPlatform(); err != nil {
 			report.NextSteps = append(report.NextSteps,
-				"Paketiniz container app'leri kapsıyor ama platform aktif değil ve otomatik aktivasyon başarısız: "+err.Error()+" — panelden Managed Container Apps'i etkinleştirin.")
+				T("Your package covers container apps but the platform is not active, and activating it automatically failed: ", "Paketiniz container app'leri kapsıyor ama platform aktif değil ve otomatik aktivasyon başarısız: ")+err.Error()+T(" — enable Managed Container Apps from the panel.", " — panelden Managed Container Apps'i etkinleştirin."))
 		} else {
 			report.Entitlement.PlatformActive = true
 			if msg != "" {
-				report.Notes = append(report.Notes, "Managed Container Apps bu hesapta etkinleştirildi.")
+				report.Notes = append(report.Notes, T("Managed Container Apps has been enabled on this account.", "Managed Container Apps bu hesapta etkinleştirildi."))
 			}
 			report.NextSteps = append(report.NextSteps,
-				fmt.Sprintf("Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez).",
+				fmt.Sprintf(T("Package ready (%s, %d app allowance). Next step: `cdnctl deploy` — it builds from source and puts it live (no git, no registry).", "Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez)."),
 					report.Entitlement.PackageName, report.Entitlement.MaxApps))
 		}
 	default:
 		report.NextSteps = append(report.NextSteps,
-			fmt.Sprintf("Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez).",
+			fmt.Sprintf(T("Package ready (%s, %d app allowance). Next step: `cdnctl deploy` — it builds from source and puts it live (no git, no registry).", "Paket hazır (%s, %d app hakkı). Sıradaki adım: `cdnctl deploy` — kaynak koddan build edip canlıya alır (git/registry gerekmez)."),
 				report.Entitlement.PackageName, report.Entitlement.MaxApps))
 	}
 	// Deploy needs a Dockerfile and init could not write one for this stack:
@@ -1093,11 +1093,11 @@ func cmdInit(args parsedArgs) error {
 	// back at init, which is a loop with no exit.
 	if !report.Project.HasDockerfile && report.Entitlement.PlatformEnabled {
 		report.NextSteps = append([]string{
-			fmt.Sprintf("Bu proje tipi (%s) için hazır Dockerfile şablonumuz yok — bir Dockerfile yazın, sonra `cdnctl deploy`. (Şablon üretebildiklerimiz: node, python, go, php, statik site.)", report.Project.Language),
+			fmt.Sprintf(T("We have no Dockerfile template for this project type (%s) — write a Dockerfile, then `cdnctl deploy`. (We can template: node, python, go, php, static sites.)", "Bu proje tipi (%s) için hazır Dockerfile şablonumuz yok — bir Dockerfile yazın, sonra `cdnctl deploy`. (Şablon üretebildiklerimiz: node, python, go, php, statik site.)"), report.Project.Language),
 		}, report.NextSteps...)
 	}
 	if hasErrors(report.Findings) {
-		report.NextSteps = append([]string{"Önce `cdnctl check` hatalarını düzeltin (deploy sonrası site açılmaz)."}, report.NextSteps...)
+		report.NextSteps = append([]string{T("Fix the `cdnctl check` errors first (otherwise the site will not open after deploy).", "Önce `cdnctl check` hatalarını düzeltin (deploy sonrası site açılmaz).")}, report.NextSteps...)
 	}
 
 	if jsonOut {
@@ -1116,7 +1116,7 @@ func cmdCheck(args parsedArgs) error {
 		}
 	} else {
 		if len(findings) == 0 {
-			fmt.Println("✓ Temiz: bilinen deploy engellerinden hiçbiri bulunamadı.")
+			fmt.Println(T("✓ Clean: none of the known deploy blockers were found.", "✓ Temiz: bilinen deploy engellerinden hiçbiri bulunamadı."))
 		}
 		for _, f := range findings {
 			loc := ""
@@ -1174,7 +1174,7 @@ func countSeverity(findings []finding, sev string) int {
 }
 
 func printInitHuman(r initReport) {
-	fmt.Printf("Proje    : %s (%s", r.Project.Name, r.Project.Language)
+	fmt.Printf(T("Project  : %s (%s", "Proje    : %s (%s"), r.Project.Name, r.Project.Language)
 	if r.Project.Framework != "" {
 		fmt.Printf("/%s", r.Project.Framework)
 	}
@@ -1187,33 +1187,33 @@ func printInitHuman(r initReport) {
 		for _, a := range r.Agents {
 			names = append(names, a.Name+" ("+a.Evidence+")")
 		}
-		fmt.Printf("Agent    : %s\n", strings.Join(names, ", "))
+		fmt.Printf(T("Agents   : %s\n", "Agent    : %s\n"), strings.Join(names, ", "))
 	}
 	if r.Entitlement.LoggedIn {
 		if r.Entitlement.PlatformEnabled {
 			if r.Entitlement.PlatformActive {
-				fmt.Printf("Paket    : ✓ %s (max %d app)\n", r.Entitlement.PackageName, r.Entitlement.MaxApps)
+				fmt.Printf(T("Package  : ✓ %s (max %d apps)\n", "Paket    : ✓ %s (max %d app)\n"), r.Entitlement.PackageName, r.Entitlement.MaxApps)
 			} else {
 				// Do not dress an unassigned package up as this account's plan:
 				// that is the line that told a blocked user everything was ready.
-				fmt.Printf("Paket    : bu hesapta container platformu aktif değil (elinizde atanmamış paket: %s)\n", r.Entitlement.PackageName)
+				fmt.Printf(T("Package  : the container platform is not active on this account (unassigned package you own: %s)\n", "Paket    : bu hesapta container platformu aktif değil (elinizde atanmamış paket: %s)\n"), r.Entitlement.PackageName)
 			}
 		} else {
-			fmt.Println("Paket    : ✗ container platformu yok")
+			fmt.Println(T("Package  : ✗ no container platform", "Paket    : ✗ container platformu yok"))
 		}
 	} else {
-		fmt.Println("Oturum   : ✗ login gerekiyor")
+		fmt.Println(T("Session  : ✗ login required", "Oturum   : ✗ login gerekiyor"))
 	}
 	if n := countSeverity(r.Findings, "error"); n > 0 {
-		fmt.Printf("Karne    : %d HATA, %d uyarı — ayrıntı: cdnctl check\n", n, countSeverity(r.Findings, "warning"))
+		fmt.Printf(T("Report   : %d ERROR(S), %d warning(s) — detail: cdnctl check\n", "Karne    : %d HATA, %d uyarı — ayrıntı: cdnctl check\n"), n, countSeverity(r.Findings, "warning"))
 	} else if n := countSeverity(r.Findings, "warning"); n > 0 {
-		fmt.Printf("Karne    : %d uyarı — ayrıntı: cdnctl check\n", n)
+		fmt.Printf(T("Report   : %d warning(s) — detail: cdnctl check\n", "Karne    : %d uyarı — ayrıntı: cdnctl check\n"), n)
 	}
 	for _, note := range r.Notes {
-		fmt.Printf("Not      : %s\n", note)
+		fmt.Printf(T("Note     : %s\n", "Not      : %s\n"), note)
 	}
 	if len(r.Wrote) > 0 {
-		fmt.Printf("Yazıldı  : %s\n", strings.Join(r.Wrote, ", "))
+		fmt.Printf(T("Written  : %s\n", "Yazıldı  : %s\n"), strings.Join(r.Wrote, ", "))
 	}
 	fmt.Println()
 	for _, s := range r.NextSteps {

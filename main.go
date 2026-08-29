@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.18.6"
+var version = "0.19.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -37,6 +37,9 @@ type config struct {
 	Token    string `json:"token"`
 	Account  string `json:"account,omitempty"`
 	Email    string `json:"email,omitempty"`
+	// Lang controls the language of explanations only; commands and flags are
+	// identical in every language.
+	Lang string `json:"lang,omitempty"`
 }
 
 type parsedArgs struct {
@@ -75,6 +78,10 @@ func run(args []string) error {
 
 	command := args[0]
 	parsed := parseArgs(args[1:])
+	// --lang applies to every command, so it is read before dispatch.
+	if value, ok := parsed.Options["lang"]; ok {
+		langOverride = value
+	}
 
 	switch command {
 	case "configure":
@@ -135,6 +142,7 @@ Usage:
                  command; with --yes on Homebrew cdnctl runs brew upgrade itself)
                 (refuses to move to an older published version unless --allow-downgrade is given)
   cdnctl configure --endpoint https://cdn.com.tr --token <token>
+  cdnctl configure --lang en|tr     (language of explanations; commands and flags never change)
   cdnctl accounts list              (full JSON for every account)
   cdnctl accounts ls                (compact list: uuid, domain, type)
   cdnctl accounts use <uuid>        (save a default account; --account is optional afterwards)
@@ -278,6 +286,13 @@ func cmdConfigure(args parsedArgs) error {
 	if value, ok := args.Options["token"]; ok && value != "" && value != "true" {
 		cfg.Token = value
 	}
+	if value, ok := args.Options["lang"]; ok && value != "" && value != "true" {
+		lang := normalizeLang(value)
+		if lang == "" {
+			return fmt.Errorf("unsupported --lang %q (supported: en, tr)", value)
+		}
+		cfg.Lang = lang
+	}
 	if err := writeConfig(cfg); err != nil {
 		return err
 	}
@@ -286,6 +301,7 @@ func cmdConfigure(args parsedArgs) error {
 		"message":     "cdnctl configured",
 		"config_path": configPath(),
 		"endpoint":    cfg.Endpoint,
+		"lang":        resolveLang(),
 	})
 }
 
