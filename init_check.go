@@ -6,7 +6,7 @@ package main
 // often not a human but the AI agent sitting next to them, working in this very
 // directory. So both commands speak two languages: human text, and --json whose shape
 // is a NEGOTIATION interface — "these decisions are open, these are the options" — so
-// a local agent can pick (--package/--method) instead of a human clicking through a
+// a local agent can pick (--method; package choice stays human, in the browser) instead of a human clicking through a
 // wizard. Payment stays on cdn.com.tr in the browser; cdnctl only carries context
 // there and picks the flow back up afterwards.
 //
@@ -411,7 +411,7 @@ the whole flow yourself:
   code, SQLite-in-container, missing healthcheck). Fix errors before deploying;
   exit code 1 means errors exist.
 - ` + "`cdnctl init --json`" + ` — project/entitlement state plus OPEN DECISIONS with options.
-  Pick and answer via flags (e.g. ` + "`--method`" + `, ` + "`--package`" + `). If the account lacks a
+  Pick and answer via flags (e.g. ` + "`--method`" + `). If the account lacks a
   container-platform package, cdnctl prints the purchase URL — payment happens in the
   browser on cdn.com.tr; re-run ` + "`cdnctl init`" + ` afterwards and it continues.
 - ` + "`cdnctl container apps list|show|deploy|logs ...`" + ` — manage the running app
@@ -958,7 +958,7 @@ func openDecisions(project projectInfo, ent entitlementState, method string) []d
 	if project.HasCompose {
 		methods = append(methods, "compose")
 	}
-	methods = append(methods, "source (coming-soon: tarball -> platform build)")
+	methods = append(methods, "source (tarball -> platform build; works with a plain folder)")
 	decisions := []decision{{
 		ID:       "deploy-method",
 		Question: T("How should this project be deployed?"),
@@ -967,11 +967,15 @@ func openDecisions(project projectInfo, ent entitlementState, method string) []d
 		Flag:     "--method",
 	}}
 	if ent.LoggedIn && !ent.PlatformEnabled {
+		// This decision is deliberately not answerable with a flag: package choice
+		// and payment happen in the browser, on cdn.com.tr, by a human. The agent's
+		// move is to hand over the URL and wait — advertising a --package flag here
+		// promised an automation that must not exist.
 		decisions = append(decisions, decision{
 			ID:       "package",
 			Question: T("This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)"),
-			Options:  []string{T("one of the container-platform packages on the buy-now page")},
-			Flag:     "--package",
+			Options:  []string{T("have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself")},
+			Flag:     "",
 		})
 	}
 	return decisions

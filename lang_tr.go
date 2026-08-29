@@ -28,7 +28,6 @@ var messagesTR = map[string]string{
 	"no account selected":                  "hesap seçili değil",
 	"How should this project be deployed?": "Bu proje nasıl deploy edilsin?",
 	"This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)": "Hesapta container platformu içeren paket yok — hangisi alınacak? (ödeme tarayıcıda, cdn.com.tr'de yapılır)",
-	"one of the container-platform packages on the buy-now page":                                                                       "buy-now sayfasındaki container-platform içeren paketlerden biri",
 	"✗ This account has no package that includes the container platform.":                                                              "✗ Hesapta container platformu içeren paket yok.",
 	"  → Purchase: ": "  → Satın alma: ",
 	"  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...":       "  Ödeme tamamlanınca burada otomatik devam edeceğim (Ctrl+C ile vazgeçebilirsiniz)...",
@@ -109,4 +108,5 @@ var messagesTR = map[string]string{
 	"The app is not serving. What usually explains it:": "Uygulama hizmet vermiyor. Genellikle nedeni şudur:",
 	"unknown": "bilinmiyor",
 	"App":     "Uygulama",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "seçimi ve ödemeyi buy-now sayfasında bir insan yapsın; sonrasında `cdnctl init --wait` kendiliğinden devam eder",
 }

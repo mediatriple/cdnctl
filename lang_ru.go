@@ -28,7 +28,6 @@ var messagesRU = map[string]string{
 	"no account selected":                  "аккаунт не выбран",
 	"How should this project be deployed?": "Как деплоить этот проект?",
 	"This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)": "У аккаунта нет пакета с container-платформой — какой берём? (оплата проходит в браузере, на cdn.com.tr)",
-	"one of the container-platform packages on the buy-now page":                                                                       "один из пакетов с container-платформой на странице buy-now",
 	"✗ This account has no package that includes the container platform.":                                                              "✗ У аккаунта нет пакета с container-платформой.",
 	"  → Purchase: ": "  → Покупка: ",
 	"  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...":       "  После завершения оплаты я автоматически продолжу здесь (Ctrl+C — прекратить ожидание)...",
@@ -109,4 +108,5 @@ var messagesRU = map[string]string{
 	"The app is not serving. What usually explains it:": "Приложение не обслуживает запросы. Обычная причина:",
 	"unknown": "неизвестно",
 	"App":     "Приложение",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "пусть человек выберет и оплатит на странице buy-now; затем `cdnctl init --wait` продолжит сам",
 }

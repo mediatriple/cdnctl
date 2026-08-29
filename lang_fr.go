@@ -26,7 +26,6 @@ var messagesFR = map[string]string{
 	"no account selected":                  "aucun compte sélectionné",
 	"How should this project be deployed?": "Comment ce projet doit-il être déployé ?",
 	"This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)": "Ce compte n'a aucun forfait avec la plateforme container — lequel voulez-vous ? (le paiement se fait dans le navigateur, sur cdn.com.tr)",
-	"one of the container-platform packages on the buy-now page":                                                                       "l'un des forfaits avec plateforme container de la page buy-now",
 	"✗ This account has no package that includes the container platform.":                                                              "✗ Ce compte n'a aucun forfait incluant la plateforme container.",
 	"  → Purchase: ": "  → Achat : ",
 	"  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...":       "  Je continue ici automatiquement dès que le paiement est terminé (Ctrl+C pour arrêter d'attendre)...",
@@ -107,4 +106,5 @@ var messagesFR = map[string]string{
 	"The app is not serving. What usually explains it:": "L'app ne répond pas. Ce qui l'explique le plus souvent :",
 	"unknown": "inconnu",
 	"App":     "App",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "qu'une personne choisisse et paie sur la page buy-now ; ensuite `cdnctl init --wait` reprend tout seul",
 }

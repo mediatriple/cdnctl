@@ -26,7 +26,6 @@ var messagesAR = map[string]string{
 	"no account selected":                  "لم يتم اختيار حساب",
 	"How should this project be deployed?": "كيف تريد deploy هذا المشروع؟",
 	"This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)": "لا توجد في هذا الحساب باقة تتضمن منصة الـ container — أيها تريد؟ (يتم الدفع في المتصفح، على cdn.com.tr)",
-	"one of the container-platform packages on the buy-now page":                                                                       "إحدى باقات منصة الـ container في صفحة buy-now",
 	"✗ This account has no package that includes the container platform.":                                                              "✗ لا توجد في هذا الحساب باقة تتضمن منصة الـ container.",
 	"  → Purchase: ": "  → الشراء: ",
 	"  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...":       "  سأتابع هنا تلقائيًا بمجرد اكتمال الدفع (Ctrl+C لإيقاف الانتظار)...",
@@ -107,4 +106,5 @@ var messagesAR = map[string]string{
 	"The app is not serving. What usually explains it:": "التطبيق لا يخدم الطلبات. التفسير المعتاد:",
 	"unknown": "غير معروف",
 	"App":     "التطبيق",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "دَع إنسانًا يختار ويدفع في صفحة buy-now؛ بعدها يتابع `cdnctl init --wait` من تلقاء نفسه",
 }

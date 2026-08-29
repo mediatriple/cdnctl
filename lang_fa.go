@@ -26,7 +26,6 @@ var messagesFA = map[string]string{
 	"no account selected":                  "هیچ حسابی انتخاب نشده است",
 	"How should this project be deployed?": "این پروژه چگونه deploy شود؟",
 	"This account has no package with the container platform — which one do you want? (payment happens in the browser, on cdn.com.tr)": "این حساب پکیجی با پلتفرم container ندارد — کدام را می‌خواهید؟ (پرداخت در مرورگر، روی cdn.com.tr انجام می‌شود)",
-	"one of the container-platform packages on the buy-now page":                                                                       "یکی از پکیج‌های شامل پلتفرم container در صفحه buy-now",
 	"✗ This account has no package that includes the container platform.":                                                              "✗ این حساب هیچ پکیجی شامل پلتفرم container ندارد.",
 	"  → Purchase: ": "  → خرید: ",
 	"  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)...":       "  به محض تکمیل پرداخت، به‌صورت خودکار اینجا ادامه می‌دهم (برای توقف انتظار Ctrl+C)...",
@@ -107,4 +106,5 @@ var messagesFA = map[string]string{
 	"The app is not serving. What usually explains it:": "برنامه پاسخ نمی‌دهد. توضیح رایج آن:",
 	"unknown": "نامشخص",
 	"App":     "برنامه",
+	"have a human pick and pay on the buy-now page, then `cdnctl init --wait` resumes by itself": "بگذارید یک انسان در صفحه buy-now انتخاب و پرداخت کند؛ سپس `cdnctl init --wait` خودش ادامه می‌دهد",
 }
