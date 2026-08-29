@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.20.0"
+var version = "0.21.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -1362,7 +1362,15 @@ func cmdContainer(args parsedArgs) error {
 func cmdContainerApps(action string, args parsedArgs) error {
 	account := resolveAccount(args)
 	if action == "list" {
-		return printRequest(http.MethodGet, fmt.Sprintf("accounts/%s/platform/container/apps", account), nil)
+		response, err := requestJSON(http.MethodGet, fmt.Sprintf("accounts/%s/platform/container/apps", account), nil)
+		if err != nil {
+			return err
+		}
+		if wantsJSON(args) {
+			return printJSON(response)
+		}
+		printAppListSummary(response)
+		return nil
 	}
 	if action == "create" {
 		env, err := jsonMapOption(args, "env_json", false)
@@ -1437,7 +1445,15 @@ func cmdContainerApps(action string, args parsedArgs) error {
 		}
 		return printRequest(http.MethodDelete, base, nil)
 	case "show":
-		return printRequest(http.MethodGet, base, nil)
+		response, err := requestJSON(http.MethodGet, base, nil)
+		if err != nil {
+			return err
+		}
+		if wantsJSON(args) {
+			return printJSON(response)
+		}
+		printAppSummary(response)
+		return nil
 	case "rollback":
 		return printRequest(http.MethodPost, base+"/rollback", map[string]any{
 			"revision_uuid": required(args, "revision"),

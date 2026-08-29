@@ -298,11 +298,27 @@ func cmdDeploy(args parsedArgs) error {
 		if port == 0 {
 			port = 8080
 		}
+		// The probe has to match what the app can answer. Asking the platform to
+		// poll /health on an app with no such route gets the container killed
+		// moments after it starts serving correctly — the app looks broken, the
+		// logs show a clean boot followed by SIGTERM, and nothing says why.
+		// A TCP probe asks the only question we can answer for sure: is the port
+		// open? cdnctl check still recommends adding /health.
+		healthPath := readManifestValue(dir, "healthcheck")
+		healthType := "http"
+		if healthPath == "" {
+			if projectHasHealthRoute(dir) {
+				healthPath = "/health"
+			} else {
+				healthType = "tcp"
+				fmt.Println(T("   healthcheck: TCP (port open) — no /health route found in the code"))
+			}
+		}
 		create, err := requestJSON(http.MethodPost,
 			fmt.Sprintf("accounts/%s/platform/container/apps", account),
 			map[string]any{
 				"name": name, "image": image, "tag": tag,
-				"port": port, "healthcheck": "/health", "healthcheck_type": "http",
+				"port": port, "healthcheck": healthPath, "healthcheck_type": healthType,
 			})
 		if err != nil {
 			return err
@@ -363,7 +379,17 @@ func cmdDeploy(args parsedArgs) error {
 		}
 		time.Sleep(10 * time.Second)
 	}
-	fmt.Println(T("The app is not running yet — follow its state: cdnctl container apps show --app ") + appUUID)
+	// Timing out is where someone most needs an answer, and "not running yet"
+	// reads as patience when the truth is often a failed probe or a container
+	// that exited. Show the state and the likely reason here rather than sending
+	// the person to another command for a payload they then have to read.
+	fmt.Println()
+	if show, err := requestJSON(http.MethodGet,
+		fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID), nil); err == nil {
+		printAppSummary(show)
+	} else {
+		fmt.Println(T("The app is not running yet — follow its state: cdnctl container apps show --app ") + appUUID)
+	}
 	return errExit(1)
 }
 

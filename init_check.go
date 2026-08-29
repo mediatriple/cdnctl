@@ -462,6 +462,22 @@ func writeAgentBridge(dir string, project projectInfo) ([]string, error) {
 	return touched, nil
 }
 
+// projectHasHealthRoute reports whether the code actually answers a health
+// path. It is the same signal the no-healthcheck rule warns about, exposed so
+// deploy can stop configuring a probe the app cannot satisfy.
+func projectHasHealthRoute(dir string) bool {
+	found := false
+	scanProjectFiles(dir, func(path string, content []byte) {
+		if found || filepath.Base(path) == "cdnctl.yaml" {
+			return
+		}
+		if reHealthRoute.Match(content) {
+			found = true
+		}
+	})
+	return found
+}
+
 // ---------- manifest ----------
 
 func writeManifest(dir string, project projectInfo, method string) (bool, error) {
@@ -473,14 +489,21 @@ func writeManifest(dir string, project projectInfo, method string) (bool, error)
 	if port == 0 {
 		port = 8080
 	}
+	// Only claim a health path the code actually serves. Writing "/health" into
+	// the manifest of an app that has no such route makes the platform kill a
+	// perfectly healthy container for failing a probe it was never going to pass.
+	health := "healthcheck: /health"
+	if !projectHasHealthRoute(dir) {
+		health = "# healthcheck: /health   # add a route that returns 200, then uncomment"
+	}
 	manifest := fmt.Sprintf(`# cdnctl project manifest — `+"`cdnctl deploy`"+` reads this.
 name: %s
 language: %s
 port: %d
-healthcheck: /health
+%s
 deploy:
   method: %s   # source (tarball -> platform build) | git | compose
-`, project.Name, project.Language, port, method)
+`, project.Name, project.Language, port, health, method)
 	return true, os.WriteFile(path, []byte(manifest), 0o644)
 }
 
