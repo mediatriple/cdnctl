@@ -114,4 +114,13 @@ var messagesAR = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "انتهت صلاحية الرابط قبل الموافقة. شغّل `cdnctl login` مجددًا.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "انتهت مهلة انتظار المتصفح. شغّل `cdnctl login` مجددًا.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — يفتح المتصفح: سجّل الدخول هناك، أو أنشئ حسابًا إن لم يكن لديك؛ الموافقة تربط هذا الطرفية بحسابك. شراء الباقة يكتمل في المتصفح أيضًا، ثم يتابع `cdnctl init` من حيث توقف.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ اختير حسابك الوحيد تلقائيًا: %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ يجري إنشاء حساب وربط باقتك به...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ أُنشئ الحساب ورُبطت الباقة واختير: %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "تعذّر إنشاء الحساب تلقائيًا (%v) — يستطيع معالج اللوحة فعل ذلك: cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "تعذّر إنشاء الحساب تلقائيًا — يستطيع معالج اللوحة فعل ذلك: cdn.com.tr",
+	"container platform": "منصة الحاويات",
+	"Package  : ✓ container platform active (max %d apps)\n":         "الباقة   : ✓ منصة الحاويات مفعّلة (بحد أقصى %d تطبيق)\n",
+	"warning: could not enable container routes automatically: %v\n": "تحذير: تعذّر تفعيل مسارات الحاويات تلقائيًا: %v\n",
+	"warning: could not activate the account automatically: %v\n":    "تحذير: تعذّر تفعيل الحساب تلقائيًا: %v\n",
 }

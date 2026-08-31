@@ -114,4 +114,13 @@ var messagesFA = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "پیوند پیش از تأیید منقضی شد. دوباره `cdnctl login` را اجرا کنید.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "مهلت انتظار مرورگر تمام شد. دوباره `cdnctl login` را اجرا کنید.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — مرورگر را باز می‌کند: همان‌جا وارد شوید یا اگر حساب ندارید ثبت‌نام کنید؛ تأیید، این ترمینال را به حسابتان پیوند می‌دهد. خرید بسته هم در مرورگر تمام می‌شود و سپس `cdnctl init` ادامه می‌دهد.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ تنها حساب شما به‌طور خودکار انتخاب شد: %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ در حال ساخت حساب و اختصاص بسته شما به آن...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ حساب ساخته شد، بسته اختصاص یافت و انتخاب شد: %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "ساخت خودکار حساب ممکن نشد (%v) — جادوگر پنل می‌تواند انجامش دهد: cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "ساخت خودکار حساب ممکن نشد — جادوگر پنل می‌تواند انجامش دهد: cdn.com.tr",
+	"container platform": "پلتفرم کانتینر",
+	"Package  : ✓ container platform active (max %d apps)\n":         "بسته     : ✓ پلتفرم کانتینر فعال است (حداکثر %d برنامه)\n",
+	"warning: could not enable container routes automatically: %v\n": "هشدار: فعال‌سازی خودکار مسیرهای کانتینر ممکن نشد: %v\n",
+	"warning: could not activate the account automatically: %v\n":    "هشدار: فعال‌سازی خودکار حساب ممکن نشد: %v\n",
 }

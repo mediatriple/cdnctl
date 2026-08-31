@@ -114,4 +114,13 @@ var messagesES = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "El enlace caducó antes de la aprobación. Ejecute `cdnctl login` de nuevo.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "Tiempo de espera agotado. Ejecute `cdnctl login` de nuevo.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — abre el navegador: inicie sesión allí, o regístrese si no tiene cuenta; aprobar vincula esta terminal. La compra del paquete también termina en el navegador, y `cdnctl init` continúa después.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ Su única cuenta se seleccionó automáticamente: %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ Creando una cuenta y asignándole su paquete...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ Cuenta creada, paquete asignado y seleccionado: %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "No se pudo crear la cuenta automáticamente (%v) — el asistente del panel puede hacerlo: cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "No se pudo crear la cuenta automáticamente — el asistente del panel puede hacerlo: cdn.com.tr",
+	"container platform": "plataforma de containers",
+	"Package  : ✓ container platform active (max %d apps)\n":         "Paquete  : ✓ plataforma de containers activa (máx. %d apps)\n",
+	"warning: could not enable container routes automatically: %v\n": "aviso: no se pudieron habilitar las rutas de containers automáticamente: %v\n",
+	"warning: could not activate the account automatically: %v\n":    "aviso: no se pudo activar la cuenta automáticamente: %v\n",
 }

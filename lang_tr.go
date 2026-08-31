@@ -116,4 +116,13 @@ var messagesTR = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "Onaylanmadan bağlantının süresi doldu. `cdnctl login` komutunu yeniden çalıştırın.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "Tarayıcı beklerken zaman aşımı. `cdnctl login` komutunu yeniden çalıştırın.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — tarayıcıyı açar: orada giriş yapın, hesabınız yoksa kayıt olun; onay bu terminali hesabınıza bağlar. Paket satın alma da tarayıcıda biter; sonrasında `cdnctl init` kaldığı yerden sürer.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ Tek hesabınız otomatik seçildi: %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ Hesap oluşturuluyor ve paketiniz ona atanıyor...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ Hesap oluşturuldu, paket atandı ve seçildi: %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "Hesap otomatik oluşturulamadı (%v) — panel sihirbazı yapabilir: cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "Hesap otomatik oluşturulamadı — panel sihirbazı yapabilir: cdn.com.tr",
+	"container platform": "container platformu",
+	"Package  : ✓ container platform active (max %d apps)\n":         "Paket    : ✓ container platformu aktif (max %d app)\n",
+	"warning: could not enable container routes automatically: %v\n": "uyarı: container rotaları otomatik açılamadı: %v\n",
+	"warning: could not activate the account automatically: %v\n":    "uyarı: hesap otomatik aktifleştirilemedi: %v\n",
 }

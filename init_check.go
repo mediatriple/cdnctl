@@ -393,6 +393,16 @@ func runChecks(dir string) []finding {
 const bridgeBegin = "<!-- cdnctl:begin -->"
 const bridgeEnd = "<!-- cdnctl:end -->"
 
+// packageReadyLine survives a missing package name (the account preflight
+// reports limits, not names).
+func packageReadyLine(ent entitlementState) string {
+	name := ent.PackageName
+	if name == "" {
+		name = T("container platform")
+	}
+	return fmt.Sprintf(T("Package ready (%s, %d app allowance). Next step: `cdnctl deploy` — it builds from source and puts it live (no git, no registry)."), name, ent.MaxApps)
+}
+
 func dedupeStrings(items []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -786,6 +796,11 @@ type entitlementState struct {
 	// they have paid for and not yet assigned to any account.
 	ReadyAccounts []readyAccount `json:"ready_accounts,omitempty"`
 	SparePackages []sparePackage `json:"spare_packages,omitempty"`
+	// How many accounts the user has in total, and the uuid when there is
+	// exactly one — a brand-new user should not be asked to "select" from a
+	// list of one, or to hand-assemble an account the CLI can create for them.
+	AccountCount int    `json:"account_count"`
+	OnlyAccount  string `json:"only_account,omitempty"`
 }
 
 type readyAccount struct {
@@ -796,6 +811,9 @@ type readyAccount struct {
 type sparePackage struct {
 	Name    string `json:"package_name"`
 	MaxApps int    `json:"max_container_apps,omitempty"`
+	// The user_orders id — what accounts/store expects as "package" when
+	// assigning this purchase to a new account.
+	OrderID int `json:"order_id,omitempty"`
 }
 
 func checkEntitlement() entitlementState {
@@ -832,6 +850,9 @@ func checkEntitlement() entitlementState {
 		if max, ok := pkg["managed_max_container_apps"].(float64); ok {
 			spare.MaxApps = int(max)
 		}
+		if id, ok := pkg["id"].(float64); ok {
+			spare.OrderID = int(id)
+		}
 		state.SparePackages = append(state.SparePackages, spare)
 		if !state.PlatformEnabled {
 			state.PlatformEnabled = true
@@ -844,6 +865,12 @@ func checkEntitlement() entitlementState {
 	// these needs no purchase and no activation.
 	if accounts, ok := resp["accounts"].([]any); ok {
 		cfg := readConfig()
+		state.AccountCount = len(accounts)
+		if len(accounts) == 1 {
+			if acc, ok := accounts[0].(map[string]any); ok {
+				state.OnlyAccount, _ = acc["uuid"].(string)
+			}
+		}
 		for _, raw := range accounts {
 			acc, ok := raw.(map[string]any)
 			if !ok {
@@ -865,7 +892,19 @@ func checkEntitlement() entitlementState {
 		}
 	}
 
-	if state.PlatformEnabled {
+	// The selected account's own platform is the primary truth. Deriving
+	// "enabled" only from the unassigned-package list has a blind spot at the
+	// exact moment of success: assigning the package empties that list, so the
+	// freshly provisioned account read as "no platform" one line after we
+	// created it.
+	if readConfig().Account != "" {
+		active, block := containerPlatformActive()
+		state.PlatformActive = active
+		state.ActivateBlock = block
+		if active {
+			state.PlatformEnabled = true
+		}
+	} else if state.PlatformEnabled {
 		state.PlatformActive, state.ActivateBlock = containerPlatformActive()
 	}
 	// When the account really can deploy, its own limits come from the
@@ -972,6 +1011,72 @@ func activateContainerPlatform() (string, error) {
 	return msg, nil
 }
 
+// ensureAccountReady removes the two pieces of busywork a brand-new purchaser
+// was handed: "assign your package to an account in the panel" and "now select
+// that account". With exactly one account, selecting it is not a decision — it
+// is done silently. With zero accounts and exactly one unassigned
+// container-platform package, the account is created and the package assigned
+// through the same accounts/store endpoint the panel wizard uses (account
+// shell, subdomain, managed-container platform, package attach, entitlement
+// sync — one call, server-side, atomic). Any ambiguity — several accounts,
+// several packages — stays a human decision and falls through to the messages.
+func ensureAccountReady(ent *entitlementState, projectName string) {
+	cfg := readConfig()
+	if cfg.Account != "" || !ent.LoggedIn {
+		return
+	}
+
+	if ent.AccountCount == 1 && ent.OnlyAccount != "" {
+		cfg.Account = ent.OnlyAccount
+		if writeConfig(cfg) == nil {
+			fmt.Printf(T("✓ Your only account was selected automatically: %s\n"), ent.OnlyAccount)
+			refreshed := checkEntitlement()
+			*ent = refreshed
+		}
+		return
+	}
+
+	if ent.AccountCount == 0 && len(ent.SparePackages) == 1 && ent.SparePackages[0].OrderID > 0 {
+		fmt.Println(T("→ Creating an account and assigning your package to it..."))
+		resp, err := requestJSON(http.MethodPost, "accounts/store", map[string]any{
+			"withoutDomain":  1,
+			"content_source": "hosting",
+			"platform_type":  "managed-container",
+			"alias":          projectName,
+			"package":        ent.SparePackages[0].OrderID,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, T("Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n"), err)
+			return
+		}
+		uuid := findString(resp, "uuid")
+		if uuid == "" {
+			fmt.Fprintln(os.Stderr, T("Could not create the account automatically — the panel wizard can do it: cdn.com.tr"))
+			return
+		}
+		cfg.Account = uuid
+		if writeConfig(cfg) == nil {
+			fmt.Printf(T("✓ Account created, package assigned and selected: %s\n"), uuid)
+		}
+
+		// Creation alone leaves the account dark at the edge: platform_apps_enabled
+		// is 0 (ca-* routes not generated) and status is 0 (the edge serves the
+		// "no service configured" page for inactive accounts). The panel wizard
+		// flips both after its own store; so do we — enable-apps is DB-only, and
+		// status/1 activates the account and queues the edge config deploy that
+		// makes the app's subdomain actually serve.
+		if _, err := requestJSON(http.MethodPost, "accounts/"+uuid+"/platform/enable-apps", map[string]any{}); err != nil {
+			fmt.Fprintf(os.Stderr, T("warning: could not enable container routes automatically: %v\n"), err)
+		}
+		if _, err := requestJSON(http.MethodGet, "accounts/"+uuid+"/status/1", nil); err != nil {
+			fmt.Fprintf(os.Stderr, T("warning: could not activate the account automatically: %v\n"), err)
+		}
+
+		refreshed := checkEntitlement()
+		*ent = refreshed
+	}
+}
+
 // buyNowURL carries the need as context. The panel does not read these parameters
 // YET (measured 2026-08-25) — sending them anyway is harmless today and turns into
 // package pre-selection the day the page learns to read them.
@@ -1048,10 +1153,14 @@ func cmdInit(args parsedArgs) error {
 	// --wait: el sıkışmasının dönüş bacağı. Ödeme tarayıcıda biterken cdnctl burada
 	// entitlement'ı yoklar ve paket aktifleşir aktifleşmez kaldığı yerden sürer —
 	// panel tarafına hiçbir ek uç gerekmeden (accounts list bunu zaten görüyor).
-	if args.Bools["wait"] && report.Entitlement.LoggedIn && !report.Entitlement.PlatformEnabled {
+	// Interactive init should not end at "go buy a package and run me again":
+	// open the purchase page and wait right here — the same handshake --wait
+	// always did, now the default whenever a human is at the terminal.
+	if (args.Bools["wait"] || isInteractive()) && report.Entitlement.LoggedIn && !report.Entitlement.PlatformEnabled {
 		cfg := readConfig()
 		fmt.Println(T("✗ This account has no package that includes the container platform."))
 		fmt.Println(T("  → Purchase: ") + buyNowURL(cfg.Endpoint))
+		tryOpenBrowser(buyNowURL(cfg.Endpoint))
 		fmt.Println(T("  I will continue here automatically once the payment completes (Ctrl+C to stop waiting)..."))
 		deadline := time.Now().Add(30 * time.Minute)
 		for time.Now().Before(deadline) {
@@ -1066,6 +1175,9 @@ func cmdInit(args parsedArgs) error {
 		if !report.Entitlement.PlatformEnabled {
 			fmt.Println(T("Timed out: no payment seen. After paying, `cdnctl init` is enough — it resumes where it left off."))
 		}
+	}
+	if !dryRun {
+		ensureAccountReady(&report.Entitlement, report.Project.Name)
 	}
 	report.Findings = runChecks(dir)
 	report.Decisions = openDecisions(report.Project, report.Entitlement, method)
@@ -1165,8 +1277,7 @@ func cmdInit(args parsedArgs) error {
 		}
 	default:
 		report.NextSteps = append(report.NextSteps,
-			fmt.Sprintf(T("Package ready (%s, %d app allowance). Next step: `cdnctl deploy` — it builds from source and puts it live (no git, no registry)."),
-				report.Entitlement.PackageName, report.Entitlement.MaxApps))
+			packageReadyLine(report.Entitlement))
 	}
 	// Deploy needs a Dockerfile and init could not write one for this stack:
 	// say so here rather than letting deploy fail with a message that points
@@ -1272,7 +1383,13 @@ func printInitHuman(r initReport) {
 	if r.Entitlement.LoggedIn {
 		if r.Entitlement.PlatformEnabled {
 			if r.Entitlement.PlatformActive {
-				fmt.Printf(T("Package  : ✓ %s (max %d apps)\n"), r.Entitlement.PackageName, r.Entitlement.MaxApps)
+				if r.Entitlement.PackageName != "" {
+					fmt.Printf(T("Package  : ✓ %s (max %d apps)\n"), r.Entitlement.PackageName, r.Entitlement.MaxApps)
+				} else {
+					// The account-scoped preflight reports limits but no package
+					// name; print what we know instead of "✓  (max 1 app)".
+					fmt.Printf(T("Package  : ✓ container platform active (max %d apps)\n"), r.Entitlement.MaxApps)
+				}
 			} else {
 				// Do not dress an unassigned package up as this account's plan:
 				// that is the line that told a blocked user everything was ready.

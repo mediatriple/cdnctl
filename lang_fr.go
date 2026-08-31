@@ -114,4 +114,13 @@ var messagesFR = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "Le lien a expiré avant l'approbation. Relancez `cdnctl login`.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "Délai dépassé en attendant le navigateur. Relancez `cdnctl login`.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — ouvre le navigateur : connectez-vous, ou inscrivez-vous si vous n'avez pas de compte ; l'approbation lie ce terminal. L'achat du forfait se termine aussi dans le navigateur, puis `cdnctl init` reprend.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ Votre unique compte a été sélectionné automatiquement : %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ Création d'un compte et affectation de votre forfait...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ Compte créé, forfait affecté et sélectionné : %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "Impossible de créer le compte automatiquement (%v) — l'assistant du panneau peut le faire : cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "Impossible de créer le compte automatiquement — l'assistant du panneau peut le faire : cdn.com.tr",
+	"container platform": "plateforme de containers",
+	"Package  : ✓ container platform active (max %d apps)\n":         "Forfait  : ✓ plateforme de containers active (max %d apps)\n",
+	"warning: could not enable container routes automatically: %v\n": "avertissement : impossible d'activer automatiquement les routes de containers : %v\n",
+	"warning: could not activate the account automatically: %v\n":    "avertissement : impossible d'activer automatiquement le compte : %v\n",
 }

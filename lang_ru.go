@@ -116,4 +116,13 @@ var messagesRU = map[string]string{
 	"The link expired before approval. Run `cdnctl login` again.":                                        "Срок ссылки истёк до подтверждения. Запустите `cdnctl login` ещё раз.",
 	"Timed out waiting for the browser. Run `cdnctl login` again.":                                       "Время ожидания браузера истекло. Запустите `cdnctl login` ещё раз.",
 	"`cdnctl login` — opens the browser: sign in there, or register if you have no account; approving links this terminal. A package purchase also finishes in the browser, and `cdnctl init` resumes afterwards.": "`cdnctl login` — открывает браузер: войдите там или зарегистрируйтесь, если аккаунта нет; подтверждение привязывает этот терминал. Покупка пакета тоже завершается в браузере, после чего `cdnctl init` продолжает.",
+	"✓ Your only account was selected automatically: %s\n":                                       "✓ Ваш единственный аккаунт выбран автоматически: %s\n",
+	"→ Creating an account and assigning your package to it...":                                  "→ Создаём аккаунт и привязываем к нему ваш пакет...",
+	"✓ Account created, package assigned and selected: %s\n":                                     "✓ Аккаунт создан, пакет привязан и выбран: %s\n",
+	"Could not create the account automatically (%v) — the panel wizard can do it: cdn.com.tr\n": "Не удалось создать аккаунт автоматически (%v) — мастер панели справится: cdn.com.tr\n",
+	"Could not create the account automatically — the panel wizard can do it: cdn.com.tr":        "Не удалось создать аккаунт автоматически — мастер панели справится: cdn.com.tr",
+	"container platform": "платформа контейнеров",
+	"Package  : ✓ container platform active (max %d apps)\n":         "Пакет    : ✓ платформа контейнеров активна (макс. %d прил.)\n",
+	"warning: could not enable container routes automatically: %v\n": "предупреждение: не удалось автоматически включить маршруты контейнеров: %v\n",
+	"warning: could not activate the account automatically: %v\n":    "предупреждение: не удалось автоматически активировать аккаунт: %v\n",
 }
