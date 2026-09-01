@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.25.0"
+var version = "0.26.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -187,8 +187,11 @@ Usage:
   cdnctl container registry-credentials list --account <uuid>
   cdnctl container registry-credentials create --account <uuid> --name docker --registry-url https://index.docker.io/v1/ --username <user> --password <token>
   cdnctl container registry-credentials delete --account <uuid> --credential <credential_uuid> --yes
-  cdnctl container addons list --account <uuid> --app <app_uuid>
-  cdnctl container addons enable-database --account <uuid> --app <app_uuid> --url-scheme mysql+pymysql
+  cdnctl container addons list --account <uuid>
+                (on a data_sharing=shared preprod, enabling a stateful add-on is refused
+                 unless --accept-divergence is stated — shared preprods use production's
+                 data by design, and silent divergence is how promoted data went wrong once) --app <app_uuid>
+  cdnctl container addons enable-database --account <uuid> --app <app_uuid> --url-scheme mysql+pymysql [--accept-divergence]
   cdnctl container addons disable-database --account <uuid> --app <app_uuid>
   cdnctl container addons enable-redis --account <uuid> --app <app_uuid> [--env-prefix REDIS]
   cdnctl container addons disable-redis --account <uuid> --app <app_uuid>
@@ -1692,25 +1695,28 @@ func cmdAddons(action string, args parsedArgs) error {
 		return printRequest(http.MethodGet, base, nil)
 	case "enable-database":
 		return printRequest(http.MethodPost, base+"/database", map[string]any{
-			"plan_code":  option(args, "plan", "starter"),
-			"env_prefix": option(args, "env_prefix", "DB"),
-			"storage_mb": nullableIntOption(args, "storage_mb"),
-			"url_scheme": option(args, "url_scheme", "mysql"),
+			"accept_divergence": args.Bools["accept_divergence"],
+			"plan_code":         option(args, "plan", "starter"),
+			"env_prefix":        option(args, "env_prefix", "DB"),
+			"storage_mb":        nullableIntOption(args, "storage_mb"),
+			"url_scheme":        option(args, "url_scheme", "mysql"),
 		})
 	case "disable-database":
 		return printRequest(http.MethodDelete, base+"/database", nil)
 	case "enable-redis":
 		return printRequest(http.MethodPost, base+"/redis", map[string]any{
-			"plan_code":  option(args, "plan", "starter"),
-			"env_prefix": option(args, "env_prefix", "REDIS"),
+			"accept_divergence": args.Bools["accept_divergence"],
+			"plan_code":         option(args, "plan", "starter"),
+			"env_prefix":        option(args, "env_prefix", "REDIS"),
 		})
 	case "disable-redis":
 		return printRequest(http.MethodDelete, base+"/redis", nil)
 	case "enable-postgres":
 		return printRequest(http.MethodPost, base+"/postgres", map[string]any{
-			"plan_code":  option(args, "plan", "starter"),
-			"env_prefix": option(args, "env_prefix", "DATABASE"),
-			"storage_mb": nullableIntOption(args, "storage_mb"),
+			"accept_divergence": args.Bools["accept_divergence"],
+			"plan_code":         option(args, "plan", "starter"),
+			"env_prefix":        option(args, "env_prefix", "DATABASE"),
+			"storage_mb":        nullableIntOption(args, "storage_mb"),
 		})
 	case "disable-postgres":
 		return printRequest(http.MethodDelete, base+"/postgres", map[string]any{
@@ -1719,9 +1725,10 @@ func cmdAddons(action string, args parsedArgs) error {
 		})
 	case "enable-nats":
 		return printRequest(http.MethodPost, base+"/nats", map[string]any{
-			"plan_code":  option(args, "plan", "starter"),
-			"env_prefix": option(args, "env_prefix", "NATS"),
-			"storage_mb": nullableIntOption(args, "storage_mb"),
+			"accept_divergence": args.Bools["accept_divergence"],
+			"plan_code":         option(args, "plan", "starter"),
+			"env_prefix":        option(args, "env_prefix", "NATS"),
+			"storage_mb":        nullableIntOption(args, "storage_mb"),
 		})
 	case "disable-nats":
 		return printRequest(http.MethodDelete, base+"/nats", map[string]any{
