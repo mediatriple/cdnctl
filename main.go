@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.24.0"
+var version = "0.25.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -172,7 +172,10 @@ Usage:
   cdnctl container apps show --account <uuid> --app <app_uuid>
   cdnctl container apps rollback --account <uuid> --app <app_uuid> --revision <revision_uuid>
   cdnctl container apps create-preprod --account <uuid> --app <prod_app_uuid> --state shared|clone|isolated
-  cdnctl container apps promote --account <uuid> --app <preprod_app_uuid>
+  cdnctl container apps promote --account <uuid> --app <preprod_app_uuid> [--data-strategy preserve-production|promote-with-data]
+                (stateful bindings are compared first; on any difference the promote is
+                 refused until a strategy is stated — preserve-production keeps every
+                 production binding and moves only the tested image; recommended)
   cdnctl container apps rollback-promotion --account <uuid> --app <prod_app_uuid>
   cdnctl container apps operations --account <uuid> --app <app_uuid>
   cdnctl container apps status --account <uuid> --app <app_uuid>
@@ -1503,7 +1506,15 @@ func cmdContainerApps(action string, args parsedArgs) error {
 		}
 		return printRequest(http.MethodPost, base+"/env/create-preprod", map[string]any{"state": state})
 	case "promote":
-		return printRequest(http.MethodPost, base+"/env/promote", map[string]any{})
+		// data-strategy exists because a promote once silently pointed production
+		// at the candidate's database. The server refuses on any stateful-binding
+		// difference unless one of the two strategies is stated; the refusal text
+		// lists every resource as SAME/DIFFERENT so the choice is informed.
+		payload := map[string]any{}
+		if strategy := option(args, "data_strategy", ""); strategy != "" {
+			payload["data_strategy"] = strategy
+		}
+		return printRequest(http.MethodPost, base+"/env/promote", payload)
 	case "rollback-promotion":
 		return printRequest(http.MethodPost, base+"/env/rollback", map[string]any{})
 	case "operations":
