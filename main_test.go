@@ -357,8 +357,8 @@ func TestUsageContainsNewCommands(t *testing.T) {
 }
 
 func TestVersionIs0260(t *testing.T) {
-	if version != "0.26.0" {
-		t.Fatalf("expected version 0.26.0, got %s", version)
+	if version != "0.27.0" {
+		t.Fatalf("expected version 0.27.0, got %s", version)
 	}
 }
 
@@ -1364,5 +1364,76 @@ func TestLogoutClearsEveryConfigSource(t *testing.T) {
 	}
 	if after.Account != "" {
 		t.Errorf("account survived logout: %q", after.Account)
+	}
+}
+
+// The browser (device) flow is the DEFAULT for `cdnctl login`; email+password is
+// the opt-in path. This got lost in practice not because the code was wrong but
+// because every message the CLI printed still taught the password form — a user
+// who only ever sees "Run: cdnctl login --email ... --password ..." reasonably
+// concludes that is the only way in. These tests pin both halves: the routing
+// decision, and the guidance the CLI hands out.
+func TestBrowserLoginIsTheDefaultPath(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		device bool
+	}{
+		{"bare login uses the browser", []string{"login"}, true},
+		{"--password-login opts out", []string{"login", "--password-login"}, false},
+		{"explicit email opts out", []string{"login", "--email", "a@b.com"}, false},
+		{"explicit password opts out", []string{"login", "--password", "secret"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := parseArgs(tc.args)
+			// deviceLoginPossible also requires a terminal; isolate the flag
+			// half of the decision so the test is stable under `go test`,
+			// which never runs with a TTY attached.
+			credentialsGiven := option(parsed, "email", "") != "" ||
+				option(parsed, "password", "") != "" ||
+				parsed.Bools["password_login"]
+			if credentialsGiven == tc.device {
+				t.Fatalf("%s: credentialsGiven=%v, expected browser flow=%v", tc.name, credentialsGiven, tc.device)
+			}
+		})
+	}
+}
+
+func TestCliNeverTeachesThePasswordFormAsTheWayIn(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	// "Run: cdnctl login --email" is the shape that trained people to type a
+	// password into a terminal. Documenting the flag is fine; instructing
+	// someone to start there is not.
+	if strings.Contains(string(source), "Run: cdnctl login --email") {
+		t.Fatal("a CLI message still instructs the password login as the way in; point people at `cdnctl login`")
+	}
+}
+
+// parseArgs turns "--dry-run" into the key "dry_run", so a lookup written with a
+// hyphen never matches and the flag is silently ignored. Three documented flags
+// shipped dead that way: --password-login, --skip-checks and --dry-run — the last
+// one meaning a person who asked for a dry run got a real one. Keys are cheap to
+// mistype and impossible to notice at runtime, so the convention is pinned here.
+func TestFlagLookupsUseTheNormalizedKey(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	hyphenated := regexp.MustCompile(`(Bools|Options|Multi)\["[a-z0-9]+-[a-z0-9-]+"\]`)
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, hit := range hyphenated.FindAllString(string(data), -1) {
+			t.Errorf("%s: %s uses a hyphenated flag key; parseArgs stores underscores, so this never matches", name, hit)
+		}
 	}
 }

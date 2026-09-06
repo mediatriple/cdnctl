@@ -1141,7 +1141,7 @@ type initReport struct {
 func cmdInit(args parsedArgs) error {
 	dir := option(args, "dir", ".")
 	jsonOut := args.Bools["json"]
-	dryRun := args.Bools["dry-run"]
+	dryRun := args.Bools["dry_run"]
 	method := option(args, "method", "auto")
 
 	report := initReport{
@@ -1196,7 +1196,7 @@ func cmdInit(args parsedArgs) error {
 		if len(wroteDocker) > 0 {
 			report.Project.HasDockerfile = true
 		}
-		if !args.Bools["no-agent-bridge"] {
+		if !args.Bools["no_agent_bridge"] {
 			touched, err := writeAgentBridge(dir, report.Project, report.Agents)
 			if err != nil {
 				return err

@@ -102,7 +102,10 @@ func deviceLoginPossible(args parsedArgs) bool {
 	if option(args, "email", "") != "" || option(args, "password", "") != "" {
 		return false
 	}
-	if args.Bools["password-login"] {
+	// parseArgs normalizes "--password-login" to "password_login"; the hyphenated
+	// lookup that used to be here never matched, so the documented escape hatch
+	// was silently ignored.
+	if args.Bools["password_login"] {
 		return false
 	}
 	return isInteractive()

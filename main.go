@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.26.0"
+var version = "0.27.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -132,9 +132,10 @@ func usage(w io.Writer) {
 	fmt.Fprintf(w, `cdnctl %s
 
 Usage:
-  cdnctl login                      (browser sign-in: reuses your session, registration included;
-                                     the account approves this terminal — no password typed here)
-  cdnctl login --email user@example.com --password <password>   (script/CI path; --password-login forces it)
+  cdnctl login                      (default — browser sign-in: reuses your session, registration
+                                     included; the account approves this terminal, no password typed here)
+  cdnctl login --password-login     (email+password instead; also used automatically when there is no
+                                     terminal, e.g. CI. Non-interactive: --email <email> --password <password>)
   cdnctl whoami                     (show endpoint, logged-in user, and selected account; alias: status)
   cdnctl version                    (print the installed version; alias: --version)
   cdnctl logout                     (forget the saved token, default account, and email; keeps the endpoint)
@@ -187,10 +188,10 @@ Usage:
   cdnctl container registry-credentials list --account <uuid>
   cdnctl container registry-credentials create --account <uuid> --name docker --registry-url https://index.docker.io/v1/ --username <user> --password <token>
   cdnctl container registry-credentials delete --account <uuid> --credential <credential_uuid> --yes
-  cdnctl container addons list --account <uuid>
+  cdnctl container addons list --account <uuid> --app <app_uuid>
                 (on a data_sharing=shared preprod, enabling a stateful add-on is refused
                  unless --accept-divergence is stated — shared preprods use production's
-                 data by design, and silent divergence is how promoted data went wrong once) --app <app_uuid>
+                 data by design, and silent divergence is how promoted data went wrong once)
   cdnctl container addons enable-database --account <uuid> --app <app_uuid> --url-scheme mysql+pymysql [--accept-divergence]
   cdnctl container addons disable-database --account <uuid> --app <app_uuid>
   cdnctl container addons enable-redis --account <uuid> --app <app_uuid> [--env-prefix REDIS]
@@ -1997,7 +1998,7 @@ func waitForJob(base, job string, args parsedArgs, first map[string]any) error {
 func requestJSON(method, path string, payload map[string]any) (map[string]any, error) {
 	cfg := readConfig()
 	if cfg.Token == "" {
-		return nil, errExitMessage(2, "Missing token. Run: cdnctl login --email <email> --password <password>")
+		return nil, errExitMessage(2, "Missing token. Run: cdnctl login (opens a browser; add --password-login for email+password)")
 	}
 	return requestJSONWithConfig(cfg, method, path, payload, true)
 }
@@ -2030,7 +2031,7 @@ func requestJSONWithConfig(cfg config, method, path string, payload map[string]a
 func requestMultipart(method, path string, fields map[string]string, fileField, filePath string) (map[string]any, error) {
 	cfg := readConfig()
 	if cfg.Token == "" {
-		return nil, errExitMessage(2, "Missing token. Run: cdnctl login --email <email> --password <password>")
+		return nil, errExitMessage(2, "Missing token. Run: cdnctl login (opens a browser; add --password-login for email+password)")
 	}
 	file, err := os.Open(filePath)
 	if err != nil {

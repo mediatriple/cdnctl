@@ -189,7 +189,7 @@ func cmdDeploy(args parsedArgs) error {
 
 	// Karne kapısı: hatalı deploy zaten çalışmayan bir site üretir; agent'lar
 	// --skip-checks ile bilinçli geçebilir.
-	if !args.Bools["skip-checks"] {
+	if !args.Bools["skip_checks"] {
 		findings := runChecks(dir)
 		if hasErrors(findings) {
 			fmt.Fprintln(os.Stderr, T("Deploy stopped: `cdnctl check` found ERRORS (run it for detail)."))
