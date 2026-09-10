@@ -357,8 +357,8 @@ func TestUsageContainsNewCommands(t *testing.T) {
 }
 
 func TestVersionIs0260(t *testing.T) {
-	if version != "0.27.0" {
-		t.Fatalf("expected version 0.27.0, got %s", version)
+	if version != "0.28.0" {
+		t.Fatalf("expected version 0.28.0, got %s", version)
 	}
 }
 

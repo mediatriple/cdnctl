@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.27.0"
+var version = "0.28.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -101,12 +101,20 @@ func run(args []string) error {
 		return cmdCp(parsed)
 	case "files":
 		return cmdFiles(parsed)
+	case "push":
+		return cmdPush(parsed)
 	case "container":
 		return cmdContainer(parsed)
 	case "object-storage":
 		return cmdObjectStorage(parsed)
 	case "purge":
 		return cmdPurge(parsed)
+	case "packages":
+		return cmdPackages(parsed)
+	case "cdn":
+		return cmdCdn(parsed)
+	case "waf":
+		return cmdWaf(parsed)
 	case "init":
 		return cmdInit(parsed)
 	case "check":
@@ -157,6 +165,8 @@ Usage:
   cdnctl files ls [--account <uuid>] [--path <path>]
   cdnctl files rm [--account <uuid>] --path <path> --yes
   cdnctl files mkdir [--account <uuid>] --path <path>
+  cdnctl push files upload|list|remove …   (the same file commands under the name the
+                 panel and the guides use for this flow: Push CDN)
   cdnctl container apps list --account <uuid>
   cdnctl container apps create --account <uuid> --name mobile-backend --image registry.example.com/acme/mobile-backend --tag 1.0.0 --port 8080 --healthcheck /health --healthcheck-type http|tcp|none --metrics-port 2112 --metrics-path /metrics --domain api.example.com --registry-credential <credential_uuid> --persistent-mount-path /app/data --persistent-storage-gb 5
   cdnctl container apps update --account <uuid> --app <app_uuid> --domain api.example.com --healthcheck-type tcp --metrics-port 2112 --env-json '{"APP_URL":"https://api.example.com"}' [--env KEY=VALUE ...] [--unset-env KEY ...] [--replace-env] [--secret KEY=VALUE ...] [--unset-secret KEY ...] [--persistent-mount-path /app/data] [--persistent-storage-gb 10]
@@ -246,6 +256,15 @@ Usage:
       --type variants  every stored variant of the cache key
   cdnctl purge all --account <uuid> --yes
   cdnctl purge all status --account <uuid>
+  cdnctl packages list [--owned] [--format table|json]
+                (paid packages not yet attached to an account; the ID column is
+                 what the guides call PAID_PACKAGE_ID)
+  cdnctl cdn advanced-rules list [--account <uuid>]
+  cdnctl cdn advanced-rules create --account <uuid> --file rule.json
+  cdnctl cdn advanced-rules validate --account <uuid> --file rule.json
+                (dry run: the same validation the save runs, writes nothing;
+                 exits non-zero when the rule would be rejected)
+  cdnctl waf logs [--account <uuid>] [--range 1h|1d|7d|30d] [--format table|json]
 
 Destructive commands (delete/revoke/purge all) require an explicit --yes flag.
 
