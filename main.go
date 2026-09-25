@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.28.0"
+var version = "0.29.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -115,6 +115,8 @@ func run(args []string) error {
 		return cmdCdn(parsed)
 	case "waf":
 		return cmdWaf(parsed)
+	case "logs":
+		return cmdLogs(parsed)
 	case "init":
 		return cmdInit(parsed)
 	case "check":
@@ -265,6 +267,12 @@ Usage:
                 (dry run: the same validation the save runs, writes nothing;
                  exits non-zero when the rule would be rejected)
   cdnctl waf logs [--account <uuid>] [--range 1h|1d|7d|30d] [--format table|json]
+  cdnctl logs status [--account <uuid>] [--format table|json]
+  cdnctl logs list [--account <uuid>] [--day YYYY-MM-DD] [--format table|json]
+  cdnctl logs pull [--account <uuid>] [--day YYYY-MM-DD] [--out <dir>]
+                (delivered edge access logs, gzipped JSON lines, one file per
+                 edge per 5 minutes; --day is UTC, default today; pull skips
+                 files already downloaded. Turn delivery on in the panel.)
 
 Destructive commands (delete/revoke/purge all) require an explicit --yes flag.
 
