@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.29.0"
+var version = "0.30.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -273,6 +273,12 @@ Usage:
                 (delivered edge access logs, gzipped JSON lines, one file per
                  edge per 5 minutes; --day is UTC, default today; pull skips
                  files already downloaded. Turn delivery on in the panel.)
+  cdnctl logs grep --from <time> [--to <time>] [--account <uuid>] [--format json|table] [--count] [--cache-dir <dir>]
+  cdnctl logs grep ... [--ip <addr|cidr>] [--status 404|5xx,...] [--host <name>] [--path <text>]
+  cdnctl logs grep ... [--method GET] [--cache HIT|MISS|...] [--country TR] [--text <text>]
+                (searches on this computer: downloads only the 5-minute files that
+                 overlap the window — into the same cache as pull — and filters each
+                 line; time without a zone is this computer's local time)
 
 Destructive commands (delete/revoke/purge all) require an explicit --yes flag.
 

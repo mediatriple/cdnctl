@@ -49,6 +49,8 @@ func cmdLogs(args parsedArgs) error {
 			fmt.Fprintln(os.Stderr, "Delivery is off. Turn it on in the panel: Access logs.")
 		}
 		return nil
+	case "grep":
+		return cmdLogsGrep(args, account)
 	case "list", "pull":
 	default:
 		usage(os.Stderr)
@@ -77,26 +79,35 @@ func cmdLogs(args parsedArgs) error {
 	}
 
 	outDir := option(args, "out", filepath.Join("cdntr-logs", day))
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	fetched, skipped, err := syncLogFiles(account, files, outDir)
+	if err != nil {
 		return err
+	}
+	fmt.Fprintf(os.Stderr, "%s: %d downloaded, %d already present -> %s\n", day, fetched, skipped, outDir)
+	return nil
+}
+
+// syncLogFiles makes sure every listed file is in outDir. Re-running only fetches what is
+// new: a file already present with the same size is the same upload (edges never rewrite
+// an object). Shared by pull and grep, so they use one local cache.
+func syncLogFiles(account string, files []map[string]any, outDir string) (int, int, error) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return 0, 0, err
 	}
 	fetched, skipped := 0, 0
 	for _, f := range files {
 		key := strval(f["key"])
 		target := filepath.Join(outDir, path.Base(key))
-		// Re-running pull only fetches what is new: a file already present with the
-		// same size is the same upload (edges never rewrite an object).
 		if st, err := os.Stat(target); err == nil && strconv.FormatInt(st.Size(), 10) == strval(f["size"]) {
 			skipped++
 			continue
 		}
 		if err := pullLogFile(account, key, target); err != nil {
-			return fmt.Errorf("%s: %w", key, err)
+			return fetched, skipped, fmt.Errorf("%s: %w", key, err)
 		}
 		fetched++
 	}
-	fmt.Fprintf(os.Stderr, "%s: %d downloaded, %d already present -> %s\n", day, fetched, skipped, outDir)
-	return nil
+	return fetched, skipped, nil
 }
 
 func listLogFiles(account, day string) ([]map[string]any, error) {
