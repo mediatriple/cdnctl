@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.30.0"
+var version = "0.31.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -163,10 +163,14 @@ Usage:
   cdnctl accounts current           (show the saved default account)
   cdnctl accounts clear             (forget the saved default account)
   cdnctl cp [-r] <localpath> [<account_uuid>:]<remotepath> [--force]
+  cdnctl cp [-r] [<account_uuid>]:<remotepath> <localpath> [--force]
+                (download; ":path" uses the default account; up to 10 MB per file;
+                 with -r a remote folder's contents land in <localpath>)
   cdnctl files put [--account <uuid>] --file <local> --target-path <path> [--force]
   cdnctl files ls [--account <uuid>] [--path <path>]
   cdnctl files rm [--account <uuid>] --path <path> --yes
   cdnctl files mkdir [--account <uuid>] --path <path>
+  cdnctl files get [--account <uuid>] --path <path> [--out <local>] [--force]
   cdnctl push files upload|list|remove …   (the same file commands under the name the
                  panel and the guides use for this flow: Push CDN)
   cdnctl container apps list --account <uuid>
@@ -1141,8 +1145,28 @@ func cmdCp(args parsedArgs) error {
 		positionals = append(positionals, p)
 	}
 	if len(positionals) < 2 {
-		return fmt.Errorf("usage: cdnctl cp [-r] <localpath> [<account_uuid>:]<remotepath>")
+		return fmt.Errorf("usage: cdnctl cp [-r] <localpath> [<account_uuid>:]<remotepath>  |  cdnctl cp [-r] [<account_uuid>]:<remotepath> <localpath>")
 	}
+	force := args.Bools["force"]
+
+	// scp-style direction: a remote source ("<account>:path" or ":path") means download.
+	// A local file whose name merely contains a colon
+	// (backup-2026-09-25T10:30:00.tar.gz) is still an upload, as it was before
+	// downloads existed: an existing local path wins over the account reading.
+	if srcAccount, srcPath, isRemote := parseRemoteSpec(positionals[0]); isRemote && !(srcAccount != "" && localPathExists(positionals[0])) {
+		if _, _, dstRemote := parseRemoteSpec(positionals[1]); dstRemote {
+			return fmt.Errorf("both paths are remote; copy between accounts by downloading and uploading again")
+		}
+		if srcAccount == "" {
+			resolved, err := resolveAccountE(args)
+			if err != nil {
+				return err
+			}
+			srcAccount = resolved
+		}
+		return cpDownload(srcAccount, srcPath, positionals[1], recursive, force)
+	}
+
 	localPath := positionals[0]
 	destination := positionals[1]
 	account, remotePath, hasColon := strings.Cut(destination, ":")
@@ -1164,9 +1188,8 @@ func cmdCp(args parsedArgs) error {
 	}
 	info, err := os.Stat(localPath)
 	if err != nil {
-		return fmt.Errorf("cannot read local path %s: %w", localPath, err)
+		return fmt.Errorf("cannot read local path %s: %w (to download a remote file instead, put a colon in front of it: cdnctl cp :%s ./)", localPath, err, withoutDotSlash(filepath.ToSlash(localPath)))
 	}
-	force := args.Bools["force"]
 
 	if info.IsDir() {
 		if !recursive {
@@ -1340,6 +1363,8 @@ func cmdFiles(args parsedArgs) error {
 		return printRequest(http.MethodPost, fmt.Sprintf("accounts/%s/files/mkdir", account), map[string]any{
 			"path": required(args, "path"),
 		})
+	case "get":
+		return cpDownload(account, required(args, "path"), option(args, "out", ""), false, args.Bools["force"])
 	default:
 		usage(os.Stderr)
 		return errExit(2)
