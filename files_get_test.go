@@ -53,6 +53,9 @@ func fakeFileServer(t *testing.T, files map[string]fakeFile, calls *[]string) *h
 		p := strval(req["path"])
 		*calls = append(*calls, r.URL.Path+" "+p)
 		w.Header().Set("Content-Type", "application/json")
+		if answeredLikeAnOldPanel(w, r) {
+			return
+		}
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/files/get"):
 			f, ok := files[p]
@@ -107,6 +110,21 @@ func fakeFileServer(t *testing.T, files map[string]fakeFile, calls *[]string) *h
 			t.Errorf("unexpected call %s", r.URL.Path)
 		}
 	}))
+}
+
+// answeredLikeAnOldPanel answers the folder-transfer routes the way a panel
+// that predates them does (a bare 404), so these tests keep covering the
+// per-file path that cdnctl falls back to.
+func answeredLikeAnOldPanel(w http.ResponseWriter, r *http.Request) bool {
+	for _, route := range []string{"/files/tar", "/files/tree", "/files/tar-apply"} {
+		if strings.HasSuffix(r.URL.Path, route) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"Not Found"}`)
+			return true
+		}
+	}
+	return false
 }
 
 func useServer(t *testing.T, url string) {
@@ -277,6 +295,9 @@ func TestADirectoryWithoutDashRIsRefused(t *testing.T) {
 func TestUnsafeNameInAListingIsNotWritten(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if answeredLikeAnOldPanel(w, r) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/files/get") {
 			w.WriteHeader(422)
 			_, _ = io.WriteString(w, `{"status":false,"error_code":"is_directory","message":"dir"}`)
@@ -325,6 +346,9 @@ func TestANonListAnswerIsAFailureNotAnEmptyFolder(t *testing.T) {
 	// name broke its JSON; cp -r then copied nothing and reported success.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if answeredLikeAnOldPanel(w, r) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/files/get") {
 			w.WriteHeader(422)
 			_, _ = io.WriteString(w, `{"status":false,"error_code":"is_directory","message":"dir"}`)
@@ -348,6 +372,9 @@ func TestLinkedFoldersAreNotFollowed(t *testing.T) {
 		p := strval(req["path"])
 		calls = append(calls, r.URL.Path+" "+p)
 		w.Header().Set("Content-Type", "application/json")
+		if answeredLikeAnOldPanel(w, r) {
+			return
+		}
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/files/get") && p == "x":
 			w.WriteHeader(422)
@@ -412,5 +439,24 @@ func TestTheDownloadHintKeepsTheDotOfAHiddenFile(t *testing.T) {
 	err := run([]string{"cp", "./.htaccess-missing", "./", "--account", "acct-uuid"})
 	if err == nil || !strings.Contains(err.Error(), "cdnctl cp :.htaccess-missing ./") {
 		t.Fatalf("the hint lost the leading dot: %v", err)
+	}
+}
+
+func TestRecursiveDownloadOfAnEmptyRemotePathIsTheRoot(t *testing.T) {
+	s := newTarServer(t)
+	s.write("index.php", "<?php", 0o644, fixedTime)
+	s.write("uploads/a.jpg", "jpg", 0o644, fixedTime)
+	dst := t.TempDir()
+	if _, stderr, err := captureOutput(t, func() error { return run([]string{"cp", "-r", "acct-uuid:", dst}) }); err != nil {
+		t.Fatalf("cp -r acct-uuid: failed: %v\n%s", err, stderr)
+	}
+	for rel, want := range map[string]string{"index.php": "<?php", "uploads/a.jpg": "jpg"} {
+		if b, _ := os.ReadFile(filepath.Join(dst, filepath.FromSlash(rel))); string(b) != want {
+			t.Errorf("%s = %q", rel, b)
+		}
+	}
+	// without -r an empty path is still an error: there is no file to name
+	if err := run([]string{"cp", "acct-uuid:", dst}); err == nil {
+		t.Error("cp acct-uuid: without -r must fail")
 	}
 }

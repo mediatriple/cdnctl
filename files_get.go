@@ -192,7 +192,19 @@ func withoutContent(resp map[string]any) map[string]any {
 // same way `cdnctl cp -r ./dist assets/` uploads the contents of ./dist).
 func cpDownload(account, remotePath, localDst string, recursive, force bool) error {
 	if strings.TrimSpace(remotePath) == "" {
-		return fmt.Errorf("source must include a remote path, e.g. %q", ":uploads/pic.jpg")
+		if !recursive {
+			return fmt.Errorf("source must include a remote path, e.g. %q", ":uploads/pic.jpg")
+		}
+		// like scp's "host:", an empty path with -r is the storage root
+		remotePath = "/"
+	}
+	if recursive {
+		// A folder comes as one tar (seconds instead of ~2.4 s per file). The
+		// per-file path below stays for single files and for servers that
+		// cannot send a tar yet.
+		if handled, err := cpDownloadTree(account, remotePath, localDst, force); handled {
+			return err
+		}
 	}
 	data, resp, err := fetchRemoteFile(account, remotePath)
 	if err != nil {

@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.31.0"
+var version = "0.32.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -99,6 +99,9 @@ func run(args []string) error {
 		return cmdAccounts(parsed)
 	case "cp":
 		return cmdCp(parsed)
+	case "sync":
+		// sync parses its own flags: its switches must never swallow a path
+		return cmdSync(args[1:])
 	case "files":
 		return cmdFiles(parsed)
 	case "push":
@@ -164,8 +167,18 @@ Usage:
   cdnctl accounts clear             (forget the saved default account)
   cdnctl cp [-r] <localpath> [<account_uuid>:]<remotepath> [--force]
   cdnctl cp [-r] [<account_uuid>]:<remotepath> <localpath> [--force]
-                (download; ":path" uses the default account; up to 10 MB per file;
+                (download; ":path" uses the default account; a single file up to 10 MB;
                  with -r a remote folder's contents land in <localpath>)
+                (-r moves a folder as one archive in either direction, checked end
+                 to end, no 10 MB limit; --force replaces files that exist and differ)
+  cdnctl sync <src> <dst> [--account <uuid>] [--delete] [--max-delete N] [--dry-run] [-c|--checksum]
+  cdnctl sync ... [--exclude PATTERN ...] [--modify-window N]
+                (like rsync, one direction per run: exactly one side is remote
+                 (<account_uuid>:path or :path); the CONTENTS of <src> go into <dst>;
+                 only new and changed files move (size + mtime, or SHA-256 with -c);
+                 --delete removes what <src> lacks — refused for an empty <src> or
+                 above --max-delete, skipped when anything failed; symlinks are
+                 never copied or deleted; --dry-run prints the plan and changes nothing)
   cdnctl files put [--account <uuid>] --file <local> --target-path <path> [--force]
   cdnctl files ls [--account <uuid>] [--path <path>]
   cdnctl files rm [--account <uuid>] --path <path> --yes
@@ -1214,11 +1227,21 @@ func cpUploadFile(account, localPath, target string, force bool) (map[string]any
 	return requestMultipart(http.MethodPost, fmt.Sprintf("accounts/%s/files/put", account), fields, "file", localPath)
 }
 
-// cpRecursive walks localDir and uploads every file under it to
-// remoteBase/<path-relative-to-localDir>. The server creates each file's parent
-// directories, so empty directories are simply skipped. Progress is written to
-// stderr; a JSON summary is printed to stdout.
+// cpRecursive uploads everything under localDir to
+// remoteBase/<path-relative-to-localDir>. Progress is written to stderr; a JSON
+// summary is printed to stdout.
 func cpRecursive(account, localDir, remoteBase string, force bool) error {
+	// The folder goes as one tar in 32 MiB parts plus one apply call; file by
+	// file is kept for servers that cannot apply a tar yet.
+	if handled, err := cpUploadTree(account, filepath.Clean(localDir), remoteBase, force); handled {
+		return err
+	}
+	return cpRecursivePerFile(account, localDir, remoteBase, force)
+}
+
+// cpRecursivePerFile uploads a folder one files/put per file (the way before
+// tar-apply existed).
+func cpRecursivePerFile(account, localDir, remoteBase string, force bool) error {
 	localDir = filepath.Clean(localDir)
 	remoteBase = strings.TrimRight(remoteBase, "/")
 	uploaded, failed := 0, 0
@@ -2087,6 +2110,12 @@ func requestJSONWithConfig(cfg config, method, path string, payload map[string]a
 }
 
 func requestMultipart(method, path string, fields map[string]string, fileField, filePath string) (map[string]any, error) {
+	return requestMultipartTimeout(method, path, fields, fileField, filePath, 120*time.Second)
+}
+
+// requestMultipartTimeout is requestMultipart with a caller-chosen total
+// timeout: a 32 MiB upload part needs longer than 120 s on a slow uplink.
+func requestMultipartTimeout(method, path string, fields map[string]string, fileField, filePath string, timeout time.Duration) (map[string]any, error) {
 	cfg := readConfig()
 	if cfg.Token == "" {
 		return nil, errExitMessage(2, "Missing token. Run: cdnctl login (opens a browser; add --password-login for email+password)")
@@ -2122,11 +2151,15 @@ func requestMultipart(method, path string, fields map[string]string, fileField, 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	return doRequest(req)
+	return doRequestTimeout(req, timeout)
 }
 
 func doRequest(req *http.Request) (map[string]any, error) {
-	client := &http.Client{Timeout: 120 * time.Second}
+	return doRequestTimeout(req, 120*time.Second)
+}
+
+func doRequestTimeout(req *http.Request, timeout time.Duration) (map[string]any, error) {
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return map[string]any{"status": false, "http_status": 0, "error": err.Error()}, nil

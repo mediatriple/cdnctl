@@ -304,6 +304,8 @@ func TestUsageContainsNewCommands(t *testing.T) {
 		"cdnctl logout",
 		// file transfer commands
 		"cdnctl cp [-r] <localpath> [<account_uuid>:]<remotepath>",
+		"cdnctl sync <src> <dst>",
+		"--delete", "--max-delete", "--dry-run", "--checksum", "--exclude", "--modify-window",
 		"accounts use",
 		"files put",
 		"files ls",
@@ -357,8 +359,8 @@ func TestUsageContainsNewCommands(t *testing.T) {
 }
 
 func TestVersionIs0260(t *testing.T) {
-	if version != "0.31.0" {
-		t.Fatalf("expected version 0.31.0, got %s", version)
+	if version != "0.32.0" {
+		t.Fatalf("expected version 0.32.0, got %s", version)
 	}
 }
 
@@ -384,7 +386,15 @@ func TestPrintFileResponseReturnsNonZeroForFailedAPIEnvelope(t *testing.T) {
 
 func TestRecursiveCopyStopsAfterFirstStorageFullResponse(t *testing.T) {
 	requests := 0
+	discards := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/files/tar-apply") {
+			// the abandoned upload session is cleaned up; not an upload attempt
+			discards++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":true,"result":{"discarded":true}}`)
+			return
+		}
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInsufficientStorage)
@@ -412,6 +422,9 @@ func TestRecursiveCopyStopsAfterFirstStorageFullResponse(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("expected fail-fast after one request, got %d requests", requests)
+	}
+	if discards != 1 {
+		t.Fatalf("the refused upload's session was not discarded (%d discard calls)", discards)
 	}
 }
 
