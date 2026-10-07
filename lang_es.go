@@ -123,4 +123,20 @@ var messagesES = map[string]string{
 	"Package  : ✓ container platform active (max %d apps)\n":         "Paquete  : ✓ plataforma de containers activa (máx. %d apps)\n",
 	"warning: could not enable container routes automatically: %v\n": "aviso: no se pudieron habilitar las rutas de containers automáticamente: %v\n",
 	"warning: could not activate the account automatically: %v\n":    "aviso: no se pudo activar la cuenta automáticamente: %v\n",
+
+	// waf show
+	"The Reference ID must be 12 to 32 hexadecimal characters: the full ID from the block page, or at least the first 12 characters the panel shows.": "El Reference ID debe tener de 12 a 32 caracteres hexadecimales: el ID completo de la página de bloqueo, o al menos los 12 primeros caracteres que muestra el panel.",
+	"unexpected response from the API": "respuesta inesperada de la API",
+	"No WAF event with Reference ID %s in the last 30 days on this account's sites. If the block page came from a site on another account, pass --account <uuid>.": "No hay ningún evento WAF con el Reference ID %s en los últimos 30 días en los sitios de esta cuenta. Si la página de bloqueo vino de un sitio de otra cuenta, indique --account <uuid>.",
+	"Time":          "Hora",
+	"Status":        "Estado",
+	"Method":        "Método",
+	"Host":          "Host",
+	"Client IP":     "IP del cliente",
+	"Content type":  "Tipo de contenido",
+	"Size":          "Tamaño",
+	"Matched rules": "Reglas coincidentes",
+	"matched:":      "coincidencia:",
+	"Verdict":       "Diagnóstico",
+	"%s (%d bytes)": "%s (%d bytes)",
 }

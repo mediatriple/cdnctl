@@ -123,4 +123,20 @@ var messagesFR = map[string]string{
 	"Package  : ✓ container platform active (max %d apps)\n":         "Forfait  : ✓ plateforme de containers active (max %d apps)\n",
 	"warning: could not enable container routes automatically: %v\n": "avertissement : impossible d'activer automatiquement les routes de containers : %v\n",
 	"warning: could not activate the account automatically: %v\n":    "avertissement : impossible d'activer automatiquement le compte : %v\n",
+
+	// waf show
+	"The Reference ID must be 12 to 32 hexadecimal characters: the full ID from the block page, or at least the first 12 characters the panel shows.": "Le Reference ID doit compter de 12 à 32 caractères hexadécimaux : l’ID complet de la page de blocage, ou au moins les 12 premiers caractères affichés dans le panneau.",
+	"unexpected response from the API": "réponse inattendue de l’API",
+	"No WAF event with Reference ID %s in the last 30 days on this account's sites. If the block page came from a site on another account, pass --account <uuid>.": "Aucun événement WAF avec le Reference ID %s au cours des 30 derniers jours sur les sites de ce compte. Si la page de blocage provenait d’un site d’un autre compte, indiquez --account <uuid>.",
+	"Time":          "Heure",
+	"Status":        "Statut",
+	"Method":        "Méthode",
+	"Host":          "Hôte",
+	"Client IP":     "IP du client",
+	"Content type":  "Type de contenu",
+	"Size":          "Taille",
+	"Matched rules": "Règles déclenchées",
+	"matched:":      "correspondance :",
+	"Verdict":       "Diagnostic",
+	"%s (%d bytes)": "%s (%d octets)",
 }

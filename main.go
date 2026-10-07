@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.32.0"
+var version = "0.33.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -284,6 +284,11 @@ Usage:
                 (dry run: the same validation the save runs, writes nothing;
                  exits non-zero when the rule would be rejected)
   cdnctl waf logs [--account <uuid>] [--range 1h|1d|7d|30d] [--format table|json]
+  cdnctl waf show <ref> [--account <uuid>] [--format table|json]
+                (one blocked request in detail: <ref> is the Reference ID on the
+                 block page — all 32 characters, or the first 12+ the panel shows;
+                 last 30 days; prints every matched rule and a verdict; exit 1
+                 when nothing matches)
   cdnctl logs status [--account <uuid>] [--format table|json]
   cdnctl logs list [--account <uuid>] [--day YYYY-MM-DD] [--format table|json]
   cdnctl logs pull [--account <uuid>] [--day YYYY-MM-DD] [--out <dir>]
@@ -2077,18 +2082,24 @@ func waitForJob(base, job string, args parsedArgs, first map[string]any) error {
 }
 
 func requestJSON(method, path string, payload map[string]any) (map[string]any, error) {
+	return requestJSONWithHeaders(method, path, payload, nil)
+}
+
+// requestJSONWithHeaders is requestJSON plus extra request headers, e.g. the
+// Accept-Language of an endpoint whose explanations are written for the reader.
+func requestJSONWithHeaders(method, path string, payload map[string]any, headers map[string]string) (map[string]any, error) {
 	cfg := readConfig()
 	if cfg.Token == "" {
 		return nil, errExitMessage(2, "Missing token. Run: cdnctl login (opens a browser; add --password-login for email+password)")
 	}
-	return requestJSONWithConfig(cfg, method, path, payload, true)
+	return requestJSONWithConfig(cfg, method, path, payload, true, headers)
 }
 
 func requestJSONPublic(cfg config, method, path string, payload map[string]any) (map[string]any, error) {
-	return requestJSONWithConfig(cfg, method, path, payload, false)
+	return requestJSONWithConfig(cfg, method, path, payload, false, nil)
 }
 
-func requestJSONWithConfig(cfg config, method, path string, payload map[string]any, auth bool) (map[string]any, error) {
+func requestJSONWithConfig(cfg config, method, path string, payload map[string]any, auth bool, headers map[string]string) (map[string]any, error) {
 	var body io.Reader
 	if method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut || method == http.MethodDelete {
 		data, err := json.Marshal(payloadOrEmpty(payload))
@@ -2105,6 +2116,9 @@ func requestJSONWithConfig(cfg config, method, path string, payload map[string]a
 	req.Header.Set("Content-Type", "application/json")
 	if auth {
 		req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	return doRequest(req)
 }

@@ -125,4 +125,20 @@ var messagesTR = map[string]string{
 	"Package  : ✓ container platform active (max %d apps)\n":         "Paket    : ✓ container platformu aktif (max %d app)\n",
 	"warning: could not enable container routes automatically: %v\n": "uyarı: container rotaları otomatik açılamadı: %v\n",
 	"warning: could not activate the account automatically: %v\n":    "uyarı: hesap otomatik aktifleştirilemedi: %v\n",
+
+	// waf show
+	"The Reference ID must be 12 to 32 hexadecimal characters: the full ID from the block page, or at least the first 12 characters the panel shows.": "Reference ID 12 ile 32 arası onaltılık (hex) karakter olmalı: engel sayfasındaki ID'nin tamamı ya da en az panelin gösterdiği ilk 12 karakter.",
+	"unexpected response from the API": "API'den beklenmeyen yanıt",
+	"No WAF event with Reference ID %s in the last 30 days on this account's sites. If the block page came from a site on another account, pass --account <uuid>.": "Bu hesabın sitelerinde son 30 günde Reference ID'si %s olan WAF olayı yok. Engel sayfası başka bir hesaptaki siteden geldiyse --account <uuid> verin.",
+	"Time":          "Zaman",
+	"Status":        "Durum",
+	"Method":        "Yöntem",
+	"Host":          "Host",
+	"Client IP":     "İstemci IP",
+	"Content type":  "İçerik türü",
+	"Size":          "Boyut",
+	"Matched rules": "Eşleşen kurallar",
+	"matched:":      "eşleşen:",
+	"Verdict":       "Değerlendirme",
+	"%s (%d bytes)": "%s (%d bayt)",
 }

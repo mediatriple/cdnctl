@@ -123,4 +123,20 @@ var messagesAR = map[string]string{
 	"Package  : ✓ container platform active (max %d apps)\n":         "الباقة   : ✓ منصة الحاويات مفعّلة (بحد أقصى %d تطبيق)\n",
 	"warning: could not enable container routes automatically: %v\n": "تحذير: تعذّر تفعيل مسارات الحاويات تلقائيًا: %v\n",
 	"warning: could not activate the account automatically: %v\n":    "تحذير: تعذّر تفعيل الحساب تلقائيًا: %v\n",
+
+	// waf show
+	"The Reference ID must be 12 to 32 hexadecimal characters: the full ID from the block page, or at least the first 12 characters the panel shows.": "يجب أن يتكون Reference ID من 12 إلى 32 حرفًا ست عشريًا: المعرّف كاملًا من صفحة الحظر، أو على الأقل أول 12 حرفًا تعرضها اللوحة.",
+	"unexpected response from the API": "استجابة غير متوقعة من API",
+	"No WAF event with Reference ID %s in the last 30 days on this account's sites. If the block page came from a site on another account, pass --account <uuid>.": "لا يوجد حدث WAF بالمعرّف Reference ID %s خلال آخر 30 يومًا في مواقع هذا الحساب. إذا ظهرت صفحة الحظر في موقع تابع لحساب آخر، فمرّر --account <uuid>.",
+	"Time":          "الوقت",
+	"Status":        "الحالة",
+	"Method":        "الطريقة",
+	"Host":          "المضيف",
+	"Client IP":     "IP العميل",
+	"Content type":  "نوع المحتوى",
+	"Size":          "الحجم",
+	"Matched rules": "القواعد المطابقة",
+	"matched:":      "المطابَق:",
+	"Verdict":       "التشخيص",
+	"%s (%d bytes)": "%s (%d بايت)",
 }

@@ -123,4 +123,20 @@ var messagesFA = map[string]string{
 	"Package  : ✓ container platform active (max %d apps)\n":         "بسته     : ✓ پلتفرم کانتینر فعال است (حداکثر %d برنامه)\n",
 	"warning: could not enable container routes automatically: %v\n": "هشدار: فعال‌سازی خودکار مسیرهای کانتینر ممکن نشد: %v\n",
 	"warning: could not activate the account automatically: %v\n":    "هشدار: فعال‌سازی خودکار حساب ممکن نشد: %v\n",
+
+	// waf show
+	"The Reference ID must be 12 to 32 hexadecimal characters: the full ID from the block page, or at least the first 12 characters the panel shows.": "Reference ID باید 12 تا 32 نویسهٔ هگزادسیمال باشد: کل شناسهٔ صفحهٔ مسدودسازی، یا دست‌کم 12 نویسهٔ اولی که پنل نشان می‌دهد.",
+	"unexpected response from the API": "پاسخ غیرمنتظره از API",
+	"No WAF event with Reference ID %s in the last 30 days on this account's sites. If the block page came from a site on another account, pass --account <uuid>.": "در 30 روز گذشته در سایت‌های این حساب هیچ رویداد WAF با Reference ID %s پیدا نشد. اگر صفحهٔ مسدودسازی از سایتی در حساب دیگری آمده، --account <uuid> را بدهید.",
+	"Time":          "زمان",
+	"Status":        "وضعیت",
+	"Method":        "متد",
+	"Host":          "میزبان",
+	"Client IP":     "IP کلاینت",
+	"Content type":  "نوع محتوا",
+	"Size":          "اندازه",
+	"Matched rules": "قوانین منطبق",
+	"matched:":      "منطبق:",
+	"Verdict":       "تشخیص",
+	"%s (%d bytes)": "%s (%d بایت)",
 }
