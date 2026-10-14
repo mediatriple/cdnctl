@@ -359,8 +359,8 @@ func TestUsageContainsNewCommands(t *testing.T) {
 }
 
 func TestVersionIs0260(t *testing.T) {
-	if version != "0.33.1" {
-		t.Fatalf("expected version 0.33.1, got %s", version)
+	if version != "0.33.2" {
+		t.Fatalf("expected version 0.33.2, got %s", version)
 	}
 }
 
@@ -1447,6 +1447,15 @@ func TestFlagLookupsUseTheNormalizedKey(t *testing.T) {
 		}
 		for _, hit := range hyphenated.FindAllString(string(data), -1) {
 			t.Errorf("%s: %s uses a hyphenated flag key; parseArgs stores underscores, so this never matches", name, hit)
+		}
+	}
+}
+
+func TestHelpFlagNeverRunsTheCommand(t *testing.T) {
+	// No account, no network: if deploy ran, it would fail asking for one.
+	for _, argv := range [][]string{{"deploy", "--help"}, {"deploy", "-h"}, {"purge", "--path", "/x", "--help"}, {"container", "apps", "delete", "x", "-h"}, {"deploy", "--help", "web"}} {
+		if err := run(argv); err != nil {
+			t.Fatalf("%v: help must print usage and return nil, got %v", argv, err)
 		}
 	}
 }

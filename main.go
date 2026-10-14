@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var version = "0.33.1"
+var version = "0.33.2"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -78,6 +78,12 @@ func run(args []string) error {
 
 	command := args[0]
 	parsed := parseArgs(args[1:])
+	// "cdnctl deploy --help" used to deploy the current folder to the saved account:
+	// --help was just an unknown flag. Asking for help never runs a command.
+	if _, help := parsed.Options["help"]; help || containsString(parsed.Positionals, "-h") {
+		usage(os.Stdout)
+		return nil
+	}
 	// --lang applies to every command, so it is read before dispatch.
 	if value, ok := parsed.Options["lang"]; ok {
 		langOverride = value
@@ -2558,4 +2564,13 @@ func isExitError(err error) (exitError, bool) {
 	var target exitError
 	ok := errors.As(err, &target)
 	return target, ok
+}
+
+func containsString(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
