@@ -783,3 +783,343 @@ func TestNextStandaloneHint(t *testing.T) {
 		t.Errorf("project already on standalone output should get no hint, got %q", got)
 	}
 }
+
+// ---------- generic Node template (not Next.js) ----------
+
+// This is the actual defect being fixed: the old generic Node template never
+// ran a build step, so a project whose "start" script expects compiled
+// output (tsc, esbuild, webpack...) shipped the unbuilt source into the
+// image and crashed on first request.
+func TestGenericNodeDockerfileRunsBuildStepWhenPresent(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"package.json": `{"name":"api","scripts":{"build":"tsc","start":"node dist/index.js"},"dependencies":{"express":"^4"},"devDependencies":{"typescript":"^5"}}`,
+		"src/index.ts": "import express from 'express'\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	if !strings.Contains(text, "RUN npm run build") {
+		t.Errorf("Dockerfile never runs the build script:\n%s", text)
+	}
+	// The build needs devDependencies (the TypeScript compiler here) —
+	// --omit=dev would strip exactly what the build step depends on.
+	if strings.Contains(text, "--omit=dev") {
+		t.Errorf("Dockerfile omits devDependencies, which the build step needs:\n%s", text)
+	}
+	// The CMD defers to the package manager's own "start" alias — like the
+	// Next.js template, it runs whatever "start" script package.json
+	// actually defines (here, the compiled dist/index.js), not a literal
+	// invocation this template would have to keep in sync with it.
+	if !strings.Contains(text, `CMD ["sh", "-c", "npm run start"]`) {
+		t.Errorf("Dockerfile does not start via npm's start script:\n%s", text)
+	}
+	if !strings.Contains(text, "0.0.0.0") {
+		t.Errorf("Dockerfile comment should still call out 0.0.0.0 binding:\n%s", text)
+	}
+}
+
+// A project with no build script must keep the original lean install —
+// devDependencies have no reason to ship in an image nothing compiles.
+func TestGenericNodeDockerfileOmitsDevWhenNoBuildScript(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"package.json": `{"name":"api","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}`,
+		"server.js":    "require('express')().listen(process.env.PORT || 8080)\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	if strings.Contains(text, "RUN npm run build") {
+		t.Errorf("no build script exists, but the Dockerfile runs one:\n%s", text)
+	}
+	if !strings.Contains(text, "--omit=dev") {
+		t.Errorf("no build step and no devDependency install should be the lean --omit=dev path:\n%s", text)
+	}
+}
+
+// Same lockfile-driven package manager detection the Next.js template uses
+// must apply to the generic template too — a yarn or pnpm project built
+// with hardcoded npm commands either fails or silently resolves a
+// different dependency tree than the one that was tested.
+func TestGenericNodeDockerfilePackageManagerVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		lockfile   string
+		wantInstal string
+		wantBuild  string
+		wantStart  string
+	}{
+		{"npm-default", "", "npm ci --omit=dev", "", "npm run start"},
+		{"yarn", "yarn.lock", "yarn install --frozen-lockfile --production", "", "yarn start"},
+		{"pnpm", "pnpm-lock.yaml", "pnpm install --frozen-lockfile --prod", "", "pnpm start"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{
+				"package.json": `{"name":"api","scripts":{"start":"node server.js"},"dependencies":{"express":"^4"}}`,
+				"server.js":    "require('express')().listen(3000)\n",
+			}
+			if tc.lockfile != "" {
+				files[tc.lockfile] = "# lockfile\n"
+			}
+			dir := writeFixture(t, files)
+			if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+				t.Fatalf("writeDockerfile: %v", err)
+			}
+			body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+			text := string(body)
+			if !strings.Contains(text, tc.wantInstal) {
+				t.Errorf("%s: missing install command %q:\n%s", tc.name, tc.wantInstal, text)
+			}
+			if !strings.Contains(text, tc.wantStart) {
+				t.Errorf("%s: missing start command %q:\n%s", tc.name, tc.wantStart, text)
+			}
+		})
+	}
+}
+
+func TestNodePackageHasScript(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"package.json": `{"name":"x","scripts":{"build":"tsc","test":"  "}}`,
+	})
+	if !nodePackageHasScript(dir, "build") {
+		t.Error("build script present but not detected")
+	}
+	if nodePackageHasScript(dir, "test") {
+		t.Error("blank script body should not count as present")
+	}
+	if nodePackageHasScript(dir, "start") {
+		t.Error("missing script reported as present")
+	}
+}
+
+// ---------- PHP template ----------
+
+// This is the actual defect being fixed: composer install ran before the
+// project's own files were copied in. For a classmap (or any autoload entry
+// that scans a directory rather than trusting composer.json alone) that
+// directory does not exist yet, so the generated autoloader silently maps
+// zero classes instead of failing loudly.
+func TestPhpDockerfileInstallsAutoloaderAfterSourceIsCopied(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"composer.json":   `{"autoload":{"classmap":["app/"]}}`,
+		"app/Greeter.php": "<?php\nnamespace App;\nclass Greeter {}\n",
+		"index.php":       "<?php\necho 'ok';\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	copyAll := strings.Index(text, "COPY . .")
+	if copyAll < 0 {
+		t.Fatalf("Dockerfile never copies the project source:\n%s", text)
+	}
+	// The first composer install (before COPY . .) must not build the
+	// autoloader yet — the directories it would scan are not there.
+	firstInstall := strings.Index(text, "composer install")
+	if firstInstall < 0 || firstInstall > copyAll {
+		t.Fatalf("expected a composer install before COPY . . (for the cached dependency fetch):\n%s", text)
+	}
+	before := text[:copyAll]
+	if !strings.Contains(before, "--no-autoloader") {
+		t.Errorf("the pre-COPY composer install must skip autoloader generation (nothing to scan yet):\n%s", before)
+	}
+	// A second pass after the source is copied must actually build the
+	// autoloader against the real project files.
+	after := text[copyAll:]
+	if !strings.Contains(after, "composer install") {
+		t.Errorf("expected a composer install after COPY . . to build the real autoloader:\n%s", after)
+	}
+}
+
+// Apache's own default config listens on 80 regardless of what EXPOSE
+// claims — the port cdnctl declares for the app (and probes/routes to) must
+// be the port Apache is actually told to bind.
+func TestPhpDockerfileRewritesApachePort(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"composer.json": `{}`,
+		"index.php":     "<?php\necho 'ok';\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	text := string(body)
+	if !strings.Contains(text, "Listen 8080") {
+		t.Errorf("ports.conf rewrite should target the declared port (8080 default):\n%s", text)
+	}
+	if !strings.Contains(text, ":8080>") {
+		t.Errorf("the default vhost rewrite should target the declared port:\n%s", text)
+	}
+	if !strings.Contains(text, "EXPOSE 8080") {
+		t.Errorf("EXPOSE should match the port Apache is told to bind:\n%s", text)
+	}
+}
+
+// ---------- static template ----------
+
+// nginx's own default config listens on 80 regardless of what EXPOSE
+// claims; the same class of bug as the PHP/Apache one above.
+func TestStaticDockerfileRewritesNginxPort(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"index.html": "<h1>hi</h1>\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	text := string(body)
+	if !strings.Contains(text, "listen\\s*80;/listen 8080;") {
+		t.Errorf("default.conf's listen 80 should be rewritten to the declared port:\n%s", text)
+	}
+	if !strings.Contains(text, "EXPOSE 8080") {
+		t.Errorf("EXPOSE should match the port nginx is told to bind:\n%s", text)
+	}
+}
+
+// ---------- Go template ----------
+
+func TestFindGoMainPackages(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"go.mod":              "module example.com/app\n\ngo 1.22\n",
+		"cmd/api/main.go":     "package main\n\nfunc main() {}\n",
+		"cmd/worker/main.go":  "package main\n\nfunc main() {}\n",
+		"internal/lib/lib.go": "package lib\n",
+	})
+	got := findGoMainPackages(dir)
+	want := []string{"cmd/api", "cmd/worker"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("findGoMainPackages = %v, want %v", got, want)
+	}
+}
+
+func TestFindGoMainPackagesSingleRootBinary(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"go.mod":  "module example.com/app\n\ngo 1.22\n",
+		"main.go": "package main\n\nfunc main() {}\n",
+	})
+	got := findGoMainPackages(dir)
+	if len(got) != 1 || got[0] != "" {
+		t.Errorf("findGoMainPackages = %v, want a single root (\"\") entry", got)
+	}
+}
+
+// Without a name match, the package whose own source actually binds a port
+// wins — that is the one serving the traffic the platform routes to.
+func TestGoPrimaryEntrypointFallsBackToPortPattern(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"cmd/ingest/main.go": "package main\n\nfunc main() {}\n",
+		"cmd/ingest/run.go":  "package main\n\nfunc run() {}\n",
+		"cmd/relay/main.go":  "package main\n\nfunc main() { _ = \"http.ListenAndServe(\\\":8080\\\", nil)\" }\n",
+	})
+	// Rewrite relay's file with a real, matchable pattern (the inline string
+	// above would itself match — keep the fixture honest with a literal call).
+	if err := os.WriteFile(filepath.Join(dir, "cmd/relay/main.go"), []byte("package main\n\nfunc main() {\n\thttp.ListenAndServe(\":8080\", nil)\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mains := findGoMainPackages(dir)
+	got := goPrimaryEntrypoint(dir, mains)
+	if got != "cmd/relay" {
+		t.Errorf("goPrimaryEntrypoint = %q, want cmd/relay (the one that binds a port)", got)
+	}
+}
+
+// Conventional names (server, api, web, app...) win over the port-pattern
+// fallback — they are a stronger, deliberate signal than a regex guess.
+func TestGoPrimaryEntrypointPrefersConventionalNames(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"cmd/worker/main.go": "package main\n\nfunc main() {}\n",
+		"cmd/api/main.go":    "package main\n\nfunc main() {}\n",
+	})
+	mains := findGoMainPackages(dir)
+	if got := goPrimaryEntrypoint(dir, mains); got != "cmd/api" {
+		t.Errorf("goPrimaryEntrypoint = %q, want cmd/api", got)
+	}
+}
+
+// A single main package (the common case, and the old template's only
+// case) must keep building exactly as it did before.
+func TestGoDockerfileSingleMainBuildsOnlyTheMainPackage(t *testing.T) {
+	// main.go plus a library package: `go build -o /out/app ./...` fails here
+	// ("cannot write multiple packages to non-directory") — the commonest Go layout.
+	dir := writeFixture(t, map[string]string{
+		"go.mod":                  "module example.com/app\n\ngo 1.22\n",
+		"main.go":                 "package main\n\nfunc main() { _ = \"http.ListenAndServe\" }\n",
+		"internal/greet/greet.go": "package greet\n\nfunc Hi() string { return \"hi\" }\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	text := string(body)
+	if !strings.Contains(text, "go build -o /out/app .\n") || strings.Contains(text, "./...") {
+		t.Errorf("single-main project must build its main package only:\n%s", text)
+	}
+	if !strings.Contains(text, `CMD ["/app"]`) {
+		t.Errorf("single-main project should keep the original CMD:\n%s", text)
+	}
+
+	nested := writeFixture(t, map[string]string{
+		"go.mod":             "module example.com/app\n\ngo 1.22\n",
+		"cmd/server/main.go": "package main\n\nfunc main() {}\n",
+		"pkg/store/store.go": "package store\n",
+	})
+	if _, err := writeDockerfile(nested, detectProject(nested)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ = os.ReadFile(filepath.Join(nested, "Dockerfile"))
+	if !strings.Contains(string(body), "go build -o /out/app ./cmd/server\n") {
+		t.Errorf("a single main under cmd/ must be built by its path:\n%s", body)
+	}
+}
+
+// This is the actual defect being fixed: `go build -o /out/app ./...` is
+// ambiguous once the module has several main packages (a cmd/api + cmd/worker
+// layout) — -o names one output file while ./... matches several mains.
+// Every binary must still get built (nothing silently dropped), and the one
+// that actually serves HTTP traffic must be the one the CMD runs.
+func TestGoDockerfileMultipleMainPackagesBuildsEachAndPicksServer(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"go.mod":             "module example.com/app\n\ngo 1.22\n",
+		"cmd/api/main.go":    "package main\n\nfunc main() {\n\thttp.ListenAndServe(\":8080\", nil)\n}\n",
+		"cmd/worker/main.go": "package main\n\nfunc main() {}\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	for _, must := range []string{
+		"go build -o /out/api ./cmd/api",
+		"go build -o /out/worker ./cmd/worker",
+		`CMD ["/out/api"]`,
+	} {
+		if !strings.Contains(text, must) {
+			t.Errorf("Dockerfile missing %q:\n%s", must, text)
+		}
+	}
+	// The ambiguous single -o/./... form from the old template must be gone.
+	if strings.Contains(text, "go build -o /out/app ./...") {
+		t.Errorf("Dockerfile still uses the ambiguous single-binary build with multiple mains:\n%s", text)
+	}
+}
