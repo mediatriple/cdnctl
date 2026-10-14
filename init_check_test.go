@@ -541,3 +541,245 @@ func TestAgentBridgeCreatesNativeFilesForDetectedAgents(t *testing.T) {
 		t.Error("a cursor-specific file was invented")
 	}
 }
+
+// --- Next.js Dockerfile template ---
+//
+// The generic node template never ran a build and its .dockerignore excluded
+// .next anyway, so `next start` crash-looped on the platform with "Could not
+// find a production build" on every single request. These tests are the
+// contract that replaces it.
+
+func writeNextApp(t *testing.T, extra map[string]string) string {
+	t.Helper()
+	files := map[string]string{
+		"package.json":   `{"name":"my-next-app","dependencies":{"next":"^14.2.0","react":"^18","react-dom":"^18"}}`,
+		"pages/index.js": "export default function Home() { return null }\n",
+	}
+	for k, v := range extra {
+		files[k] = v
+	}
+	return writeFixture(t, files)
+}
+
+func TestDetectProjectNextFramework(t *testing.T) {
+	dir := writeNextApp(t, nil)
+	info := detectProject(dir)
+	if info.Language != "node" || info.Framework != "next" {
+		t.Fatalf("node/next bekleniyordu: %+v", info)
+	}
+}
+
+// Without a build step `next start` has nothing to serve. This is the actual
+// defect being fixed: the old template wrote FROM node / COPY / CMD npm run
+// start with no RUN npm run build anywhere in between.
+func TestNextjsDockerfileRunsBuildStep(t *testing.T) {
+	dir := writeNextApp(t, nil)
+	wrote, err := writeDockerfile(dir, detectProject(dir))
+	if err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	if len(wrote) == 0 {
+		t.Fatal("no Dockerfile written for a Next.js project")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	if !strings.Contains(text, "RUN npm run build") {
+		t.Errorf("Dockerfile never runs a build step:\n%s", text)
+	}
+	// The build needs devDependencies (TypeScript, the Next compiler plugins,
+	// etc.) — omitting them is what a generic node template does, and it is
+	// wrong here.
+	if strings.Contains(text, "--omit=dev") {
+		t.Errorf("Dockerfile omits devDependencies, which the build step needs:\n%s", text)
+	}
+	if !strings.Contains(text, "0.0.0.0") {
+		t.Errorf("Dockerfile does not bind HOSTNAME to 0.0.0.0:\n%s", text)
+	}
+	if !strings.Contains(text, "ENV PORT=") {
+		t.Errorf("Dockerfile does not set PORT:\n%s", text)
+	}
+	// Non-standalone: runs next start against the full node_modules + .next
+	// this same build produced, via the package.json "start" script.
+	if !strings.Contains(text, "start") {
+		t.Errorf("Dockerfile has no start command:\n%s", text)
+	}
+
+	ignore, err := os.ReadFile(filepath.Join(dir, ".dockerignore"))
+	if err != nil {
+		t.Fatalf(".dockerignore not written: %v", err)
+	}
+	ignoreText := string(ignore)
+	// node_modules and .next are excluded from the BUILD CONTEXT (what gets
+	// uploaded), not from the image — the build stage installs and builds
+	// its own fresh copies inside the container. A host .next/node_modules
+	// would be stale or built for the wrong platform/ABI.
+	for _, must := range []string{"node_modules", ".next"} {
+		if !strings.Contains(ignoreText, must) {
+			t.Errorf(".dockerignore should still exclude %q (rebuilt inside the image):\n%s", must, ignoreText)
+		}
+	}
+	// But it must not exclude what COPY . . needs to actually produce a build:
+	// no blanket wildcard line, and not the source files we just wrote.
+	for _, line := range strings.Split(ignoreText, "\n") {
+		if strings.TrimSpace(line) == "*" {
+			t.Errorf(".dockerignore has a blanket wildcard line, which would starve the build:\n%s", ignoreText)
+		}
+	}
+	for _, mustNot := range []string{"pages", "package.json"} {
+		if strings.Contains(ignoreText, mustNot) {
+			t.Errorf(".dockerignore excludes %q, which the build needs:\n%s", mustNot, ignoreText)
+		}
+	}
+}
+
+// output: 'standalone' changes the Dockerfile shape, not just a flag: Next's
+// build already traced the minimal node_modules the app needs, so shipping
+// the full tree on top of that in the final image is wasted space.
+func TestNextjsDockerfileStandaloneVariant(t *testing.T) {
+	dir := writeNextApp(t, map[string]string{
+		"next.config.js": "module.exports = { output: 'standalone' }\n",
+	})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("Dockerfile unreadable: %v", err)
+	}
+	text := string(body)
+
+	if strings.Count(text, "FROM ") < 3 {
+		t.Errorf("standalone output expected a multi-stage build (deps/builder/runner):\n%s", text)
+	}
+	if !strings.Contains(text, "RUN npm run build") {
+		t.Errorf("standalone Dockerfile never builds:\n%s", text)
+	}
+	for _, must := range []string{
+		"COPY --from=builder /app/public ./public",
+		".next/standalone",
+		".next/static",
+		`CMD ["node", "server.js"]`,
+		`ENV HOSTNAME="0.0.0.0"`,
+	} {
+		if !strings.Contains(text, must) {
+			t.Errorf("standalone Dockerfile missing %q:\n%s", must, text)
+		}
+	}
+	// The trimmed server, not `next start`, is what standalone output ships.
+	if strings.Contains(text, "next start") || strings.Contains(text, `"start"`) {
+		t.Errorf("standalone Dockerfile should run server.js directly, not a start script:\n%s", text)
+	}
+}
+
+// The build and start commands must match whichever package manager's
+// lockfile the project actually checked in — using npm against a pnpm
+// project (or vice versa) either fails outright or silently resolves a
+// different dependency tree than the one that was tested.
+func TestNextjsDockerfilePackageManagerVariants(t *testing.T) {
+	cases := []struct {
+		name       string
+		lockfile   string
+		wantInstal string
+		wantBuild  string
+		wantCopy   string
+	}{
+		{"npm-default", "", "npm ci", "npm run build", "package-lock.json*"},
+		{"yarn", "yarn.lock", "yarn install --frozen-lockfile", "yarn build", "yarn.lock*"},
+		{"pnpm", "pnpm-lock.yaml", "pnpm install --frozen-lockfile", "pnpm build", "pnpm-lock.yaml*"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := map[string]string{}
+			if tc.lockfile != "" {
+				extra[tc.lockfile] = "# lockfile\n"
+			}
+			dir := writeNextApp(t, extra)
+			if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+				t.Fatalf("writeDockerfile: %v", err)
+			}
+			body, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+			if err != nil {
+				t.Fatalf("Dockerfile unreadable: %v", err)
+			}
+			text := string(body)
+			if !strings.Contains(text, tc.wantInstal) {
+				t.Errorf("%s: missing install command %q:\n%s", tc.name, tc.wantInstal, text)
+			}
+			if !strings.Contains(text, tc.wantBuild) {
+				t.Errorf("%s: missing build command %q:\n%s", tc.name, tc.wantBuild, text)
+			}
+			if !strings.Contains(text, tc.wantCopy) {
+				t.Errorf("%s: missing lockfile COPY %q:\n%s", tc.name, tc.wantCopy, text)
+			}
+		})
+	}
+
+	// pnpm specifically needs corepack — the node:20 image does not have pnpm
+	// pre-installed, and `npm install -g pnpm` would install whatever
+	// "latest" happens to be the day the base image was built.
+	dir := writeNextApp(t, map[string]string{"pnpm-lock.yaml": "# lockfile\n"})
+	if _, err := writeDockerfile(dir, detectProject(dir)); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if !strings.Contains(string(body), "corepack") {
+		t.Errorf("pnpm variant should enable pnpm via corepack:\n%s", body)
+	}
+}
+
+// nextConfigIsStandalone must recognise every extension next.config is
+// allowed to use, and not care which quote style the project wrote.
+func TestNextConfigIsStandaloneDetection(t *testing.T) {
+	cases := []struct {
+		name    string
+		file    string
+		content string
+		want    bool
+	}{
+		{"js-single-quote", "next.config.js", "module.exports = { output: 'standalone' }\n", true},
+		{"mjs-double-quote", "next.config.mjs", `export default { output: "standalone" }` + "\n", true},
+		{"ts", "next.config.ts", "const config = { output: 'standalone' }\nexport default config\n", true},
+		{"no-output", "next.config.js", "module.exports = { reactStrictMode: true }\n", false},
+		{"other-output", "next.config.js", "module.exports = { output: 'export' }\n", false},
+		{"absent", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.file != "" {
+				if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := nextConfigIsStandalone(dir); got != tc.want {
+				t.Errorf("nextConfigIsStandalone(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// The standalone hint is informational only: it must fire exactly for a
+// Next.js project that has not opted in yet, and stay silent otherwise (other
+// frameworks, or a project that already set output: 'standalone').
+func TestNextStandaloneHint(t *testing.T) {
+	plain := t.TempDir()
+	if got := nextStandaloneHint(plain, "next"); got == "" {
+		t.Error("expected a hint for a Next.js project without output: 'standalone'")
+	}
+	if got := nextStandaloneHint(plain, "express"); got != "" {
+		t.Errorf("non-Next.js framework should get no hint, got %q", got)
+	}
+
+	standalone := t.TempDir()
+	if err := os.WriteFile(filepath.Join(standalone, "next.config.js"), []byte("module.exports = { output: 'standalone' }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := nextStandaloneHint(standalone, "next"); got != "" {
+		t.Errorf("project already on standalone output should get no hint, got %q", got)
+	}
+}
