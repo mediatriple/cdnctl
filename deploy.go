@@ -215,6 +215,15 @@ func cmdDeploy(args parsedArgs) error {
 		}
 	}
 
+	// The health check is settled here too, before the build: a question about
+	// it after a minute of building is a question someone has stopped watching.
+	// A new app always gets a decision; an existing one keeps its probe unless
+	// a flag says otherwise.
+	health, err := resolveDeployHealthcheck(dir, args, appUUID == "", isInteractive(), os.Stdin, os.Stderr)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf(T("→ archiving source (%s)\n"), name)
 	archive, size, err := makeSourceArchive(dir, dockerfile)
 	if err != nil {
@@ -279,9 +288,16 @@ func cmdDeploy(args parsedArgs) error {
 	fallbackDomain := ""
 	if appUUID != "" {
 		fmt.Printf(T("→ pointing the existing app at the new image (%s:%s)\n"), image, tag)
+		patch := map[string]any{"image": image, "tag": tag}
+		if health.Type != "" {
+			// Only an explicit flag reaches an existing app: its probe was
+			// chosen once already and detection is no reason to change it.
+			health.addTo(patch)
+			health.announce()
+		}
 		if _, err := requestJSON(http.MethodPatch,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID),
-			map[string]any{"image": image, "tag": tag}); err != nil {
+			patch); err != nil {
 			return err
 		}
 		// PATCH calisan uygulamayi dondurur ama DURMUS olani baslatmaz (canlida
@@ -298,28 +314,12 @@ func cmdDeploy(args parsedArgs) error {
 		if port == 0 {
 			port = 8080
 		}
-		// The probe has to match what the app can answer. Asking the platform to
-		// poll /health on an app with no such route gets the container killed
-		// moments after it starts serving correctly — the app looks broken, the
-		// logs show a clean boot followed by SIGTERM, and nothing says why.
-		// A TCP probe asks the only question we can answer for sure: is the port
-		// open? cdnctl check still recommends adding /health.
-		healthPath := readManifestValue(dir, "healthcheck")
-		healthType := "http"
-		if healthPath == "" {
-			if projectHasHealthRoute(dir) {
-				healthPath = "/health"
-			} else {
-				healthType = "tcp"
-				fmt.Println(T("   healthcheck: TCP (port open) — no /health route found in the code"))
-			}
-		}
+		// The probe was settled before the build (resolveDeployHealthcheck).
+		body := map[string]any{"name": name, "image": image, "tag": tag, "port": port}
+		health.addTo(body)
+		health.announce()
 		create, err := requestJSON(http.MethodPost,
-			fmt.Sprintf("accounts/%s/platform/container/apps", account),
-			map[string]any{
-				"name": name, "image": image, "tag": tag,
-				"port": port, "healthcheck": healthPath, "healthcheck_type": healthType,
-			})
+			fmt.Sprintf("accounts/%s/platform/container/apps", account), body)
 		if err != nil {
 			return err
 		}

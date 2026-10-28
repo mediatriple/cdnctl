@@ -98,7 +98,10 @@ func failureHint(app map[string]any) string {
 	}
 	uuid, _ := app["uuid"].(string)
 	lines := []string{T("The app is not serving. What usually explains it:")}
-	if health, ok := app["healthcheck_path"].(string); ok && health != "" {
+	// Only an HTTP probe asks a path anything; naming /health on a TCP or
+	// probe-less app sends someone hunting for a cause that is not there.
+	probe, _ := app["healthcheck_type"].(string)
+	if health, ok := app["healthcheck_path"].(string); ok && health != "" && (probe == "" || probe == "http") {
 		lines = append(lines, fmt.Sprintf(T("  · the healthcheck %s never answered 200 — the platform stops a container that fails its probe"), health))
 	}
 	lines = append(lines,

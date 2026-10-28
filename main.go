@@ -17,13 +17,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
 
-var version = "0.34.0"
+var version = "0.35.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -194,7 +195,7 @@ Usage:
                  panel and the guides use for this flow: Push CDN)
   cdnctl container apps list --account <uuid>
   cdnctl container apps create --account <uuid> --name mobile-backend --image registry.example.com/acme/mobile-backend --tag 1.0.0 --port 8080 --healthcheck /health --healthcheck-type http|tcp|none --metrics-port 2112 --metrics-path /metrics --domain api.example.com --registry-credential <credential_uuid> --persistent-mount-path /app/data --persistent-storage-gb 5
-  cdnctl container apps update --account <uuid> --app <app_uuid> --domain api.example.com --healthcheck-type tcp --metrics-port 2112 --env-json '{"APP_URL":"https://api.example.com"}' [--env KEY=VALUE ...] [--unset-env KEY ...] [--replace-env] [--secret KEY=VALUE ...] [--unset-secret KEY ...] [--persistent-mount-path /app/data] [--persistent-storage-gb 10]
+  cdnctl container apps update --account <uuid> --app <app_uuid> --domain api.example.com --healthcheck /health --healthcheck-type http --metrics-port 2112 --env-json '{"APP_URL":"https://api.example.com"}' [--env KEY=VALUE ...] [--unset-env KEY ...] [--replace-env] [--secret KEY=VALUE ...] [--unset-secret KEY ...] [--persistent-mount-path /app/data] [--persistent-storage-gb 10]
       env semantics: --env-json and --env MERGE into the existing env map by default;
       pass --replace-env to REPLACE the whole map (keys not listed are removed)
       secrets vs env: use --secret for sensitive values (API keys, tokens). A key
@@ -260,7 +261,8 @@ Usage:
                 (projeyi tanır, lokal AI agent'ları bulur ve AGENTS.md/CLAUDE.md'ye deploy
                  talimatı yazar, cdnctl.yaml üretir; eksik paket varsa satın alma URL'i verir —
                  ödeme tarayıcıda biter, init yeniden çalıştırılınca kaldığı yerden sürer)
-  cdnctl deploy [--dir .] [--account <uuid>] [--name <app>] [--dockerfile Dockerfile] [--app <app_uuid>] [--skip-checks]
+  cdnctl deploy [--dir .] [--account <uuid>] [--name <app>] [--dockerfile Dockerfile] [--app <app_uuid>] [--skip-checks] [--healthcheck /health | --no-healthcheck | --healthcheck-type http|tcp|none]
+                (new app with no /health route: asks; without a terminal, one of the health flags is required)
                 (kaynagi tar'lar, yukler, platformda Kaniko ile build eder, uygulamayi
                  yeni imaja cevirir — yoksa olusturur+expose eder; git/registry GEREKMEZ)
   cdnctl deploy-token create [--account <uuid>] [--name "agent"]   (duz metin BIR KEZ gosterilir)
@@ -1538,6 +1540,10 @@ func cmdContainerApps(action string, args parsedArgs) error {
 			}
 			env[k] = v
 		}
+		appDomains, err := domains(args)
+		if err != nil {
+			return err
+		}
 		payload := map[string]any{
 			"name":                       required(args, "name"),
 			"image":                      required(args, "image"),
@@ -1549,7 +1555,7 @@ func cmdContainerApps(action string, args parsedArgs) error {
 			"metrics_path":               nullableOption(args, "metrics_path"),
 			"replicas":                   intOption(args, "replicas", 1),
 			"resource_plan":              option(args, "plan", "starter"),
-			"domains":                    domains(args),
+			"domains":                    appDomains,
 			"env":                        env,
 			"secrets":                    secrets,
 			"registry_credential_uuid":   nullableOption(args, "registry_credential"),
@@ -1667,12 +1673,12 @@ func cmdContainerAppUpdate(base string, args parsedArgs) error {
 	if value, ok := args.Options["metrics_path"]; ok {
 		payload["metrics_path"] = value
 	}
-	if value, ok := args.Options["domain"]; ok {
-		if value == "" {
-			payload["domains"] = []string{}
-		} else {
-			payload["domains"] = []string{value}
+	if _, ok := args.Options["domain"]; ok {
+		list, err := domains(args)
+		if err != nil {
+			return err
 		}
+		payload["domains"] = list
 	}
 	env, err := jsonMapOption(args, "env_json", true)
 	if err != nil {
@@ -2471,11 +2477,34 @@ func jsonMapOption(args parsedArgs, key string, nullable bool) (map[string]any, 
 	return decoded, nil
 }
 
-func domains(args parsedArgs) []string {
-	if value, ok := args.Options["domain"]; ok && value != "" {
-		return []string{value}
+// hostnamePattern accepts a DNS hostname (labels of letters, digits and inner
+// hyphens, at least one dot). It is a syntax check only, done before the call so
+// a typo never reaches the platform as a "domain".
+var hostnamePattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+
+// domains collects every --domain: the flag may repeat, and each value may hold
+// several names separated by commas or spaces ("--domain example.com,www.example.com").
+// Before this, only the last --domain was sent and a comma list went through as one
+// invalid name (2026-10-24).
+func domains(args parsedArgs) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, value := range args.Multi["domain"] {
+		for _, name := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+			name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+			if name == "" || name == "true" {
+				continue
+			}
+			if !hostnamePattern.MatchString(name) || len(name) > 253 {
+				return nil, fmt.Errorf(T("--domain: %q is not a valid hostname"), name)
+			}
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
 	}
-	return []string{}
+	return out, nil
 }
 
 func emptyToNil(value string) any {

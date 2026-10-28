@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type rpcRequest struct {
@@ -86,9 +87,10 @@ var mcpTools = []mcpTool{
 		Name:        "deploy",
 		Description: "Deploy the project from source: archive, upload, build on the platform (Kaniko sandbox), point the app at the new image (creating and exposing it if needed) and wait until it runs. No git or registry required. Long-running (1-5 minutes).",
 		InputSchema: objSchema(map[string]any{
-			"dir":     map[string]any{"type": "string", "description": "Project directory (default: current)"},
-			"account": map[string]any{"type": "string", "description": "Account UUID (default: the saved account)"},
-			"name":    map[string]any{"type": "string", "description": "App name (default: detected project name)"},
+			"dir":         map[string]any{"type": "string", "description": "Project directory (default: current)"},
+			"account":     map[string]any{"type": "string", "description": "Account UUID (default: the saved account)"},
+			"name":        map[string]any{"type": "string", "description": "App name (default: detected project name)"},
+			"healthcheck": map[string]any{"type": "string", "description": "Health check for a new app: the path the app answers with HTTP 200 (e.g. /health), or \"none\" to deploy without one. Required when the code has no /health route — the deploy is refused rather than guessed, because a probe on a missing route restarts a healthy app forever."},
 		}),
 	},
 	{
@@ -113,6 +115,8 @@ type mcpArgs struct {
 	Account string `json:"account"`
 	Name    string `json:"name"`
 	App     string `json:"app"`
+	// Health is the deploy tool's "healthcheck": a path, or "none".
+	Health string `json:"healthcheck"`
 }
 
 // captureStdout: cmdDeploy insan-okur ilerleme basar; MCP'de stdout protokolündür.
@@ -182,11 +186,22 @@ func mcpCallTool(name string, a mcpArgs) (any, *rpcError) {
 		if a.Name != "" {
 			parsed.Options["name"] = a.Name
 		}
+		switch health := strings.TrimSpace(a.Health); {
+		case strings.EqualFold(health, "none"):
+			parsed.Bools["no_healthcheck"] = true
+		case health != "":
+			parsed.Options["healthcheck"] = health
+		}
 		out, err := captureStdout(func() error { return cmdDeploy(parsed) })
 		result := map[string]any{"log": out, "succeeded": err == nil}
 		if err != nil {
-			if _, ok := isExitError(err); !ok {
+			// An exit carrying a message is the instruction the caller needs
+			// (e.g. which health-check flag to choose); a bare exit has said
+			// everything in the log already.
+			if exit, ok := isExitError(err); !ok {
 				result["error"] = err.Error()
+			} else if exit.message != "" {
+				result["error"] = exit.message
 			}
 		}
 		return result, nil

@@ -202,10 +202,18 @@ type finding struct {
 var (
 	reListenLocalhost = regexp.MustCompile(`(?i)(listen|bind|host)[^\n]{0,60}(127\.0\.0\.1|(['"])localhost(['"]))`)
 	reSecretAssign    = regexp.MustCompile(`(?i)(api[_-]?key|secret|token|passwd|password)\s*[:=]\s*["'][A-Za-z0-9_\-\.\$]{8,}["']`)
-	reHealthRoute     = regexp.MustCompile(`(?i)(/health|healthz|health_check)`)
-	rePortEnv         = regexp.MustCompile(`(?i)(process\.env\.PORT|os\.environ|getenv\(["']PORT)`)
-	reListenLiteral   = regexp.MustCompile(`\.listen\(\s*\d{2,5}\s*[,)]`)
-	reSQLiteDep       = regexp.MustCompile(`(?i)(better-sqlite3|"sqlite3"|aiosqlite|go-sqlite3|'sqlite)`)
+	// reHealthRoute matches /health as a whole path — the exact path the
+	// platform probes. It used to be a plain substring search for "/health",
+	// "healthz" or "health_check", so a /healthz in a config counted as a
+	// /health route, deploy configured an HTTP probe on /health, the probe got
+	// 404 and Kubernetes restarted a perfectly healthy app until it gave up.
+	// /healthz, /health-check, /api/health and /health/live are different
+	// paths and answer nothing on /health; a trailing slash (/health/) is the
+	// same route in every framework we detect.
+	reHealthRoute   = regexp.MustCompile(`(?im)(?:^|[^A-Za-z0-9_./-])/health/?(?:[^A-Za-z0-9_./-]|$)`)
+	rePortEnv       = regexp.MustCompile(`(?i)(process\.env\.PORT|os\.environ|getenv\(["']PORT)`)
+	reListenLiteral = regexp.MustCompile(`\.listen\(\s*\d{2,5}\s*[,)]`)
+	reSQLiteDep     = regexp.MustCompile(`(?i)(better-sqlite3|"sqlite3"|aiosqlite|go-sqlite3|'sqlite)`)
 )
 
 var checkSkipDirs = map[string]bool{
@@ -296,7 +304,7 @@ func runChecks(dir string) []finding {
 				})
 			}
 		}
-		if reHealthRoute.Match(content) {
+		if findOutsideComments(content, reHealthRoute) != nil {
 			sawHealth = true
 		}
 		if rePortEnv.Match(content) {
@@ -525,7 +533,8 @@ func projectHasHealthRoute(dir string) bool {
 		if found || filepath.Base(path) == "cdnctl.yaml" {
 			return
 		}
-		if reHealthRoute.Match(content) {
+		// A commented-out route answers nothing.
+		if findOutsideComments(content, reHealthRoute) != nil {
 			found = true
 		}
 	})
