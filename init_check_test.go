@@ -1123,3 +1123,67 @@ func TestGoDockerfileMultipleMainPackagesBuildsEachAndPicksServer(t *testing.T) 
 		t.Errorf("Dockerfile still uses the ambiguous single-binary build with multiple mains:\n%s", text)
 	}
 }
+
+// A Laravel app served from the project root exposes .env and the source
+// tree; the template must move Apache's document root to public/.
+func TestPhpDockerfileServesLaravelFromPublic(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"composer.json":    `{}`,
+		"artisan":          "#!/usr/bin/env php\n<?php\n",
+		"public/index.php": "<?php\necho 'ok';\n",
+		// Laravel ships one for its asset build; it must not win detection.
+		"package.json": `{"private":true,"scripts":{"build":"vite build"}}`,
+	})
+	project := detectProject(dir)
+	if project.Language != "php" || project.Framework != "laravel" {
+		t.Fatalf("expected laravel detection, got %q", project.Framework)
+	}
+	if _, err := writeDockerfile(dir, project); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	text := string(body)
+	for _, want := range []string{"APACHE_DOCUMENT_ROOT=/var/www/html/public", "a2enmod rewrite", "pdo_mysql", "unzip"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Laravel Dockerfile missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "artisan migrate") {
+		t.Errorf("a build has no database; migrations must not run in the Dockerfile:\n%s", text)
+	}
+}
+
+// Plain PHP keeps Apache's default document root.
+func TestPhpDockerfilePlainPhpKeepsDefaultDocroot(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"composer.json": `{}`,
+		"index.php":     "<?php\necho 'ok';\n",
+	})
+	project := detectProject(dir)
+	if project.Framework != "" {
+		t.Fatalf("plain PHP detected as %q", project.Framework)
+	}
+	if _, err := writeDockerfile(dir, project); err != nil {
+		t.Fatalf("writeDockerfile: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if strings.Contains(string(body), "APACHE_DOCUMENT_ROOT") {
+		t.Errorf("plain PHP must keep the default docroot:\n%s", body)
+	}
+}
+
+// DB_PORT / REDIS_PORT in a Laravel .env name services the app connects to;
+// taking one as the listen port routed traffic to 3306.
+func TestDetectPortIgnoresPrefixedServicePorts(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		".env":      "DB_PORT=3306\nREDIS_PORT=6379\nMAIL_PORT=2525\n",
+		"index.php": "<?php\necho 'ok';\n",
+	})
+	if got := detectPort(dir); got != 0 {
+		t.Errorf("detectPort took a service port as the listen port: %d", got)
+	}
+	dir = writeFixture(t, map[string]string{".env": "PORT=3000\n"})
+	if got := detectPort(dir); got != 3000 {
+		t.Errorf("bare PORT=3000 not detected, got %d", got)
+	}
+}

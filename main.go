@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var version = "0.35.0"
+var version = "0.36.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
