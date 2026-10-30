@@ -358,9 +358,9 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0260(t *testing.T) {
-	if version != "0.36.0" {
-		t.Fatalf("expected version 0.36.0, got %s", version)
+func TestVersionIs0370(t *testing.T) {
+	if version != "0.37.0" {
+		t.Fatalf("expected version 0.37.0, got %s", version)
 	}
 }
 
@@ -1201,13 +1201,23 @@ func TestEveryLanguageTranslatesEveryMessage(t *testing.T) {
 }
 
 // Format verbs are positional: a translation that drops %s or reorders %s and
-// %d does not misspell anything, it prints the wrong values or garbage.
+// %d does not misspell anything, it prints the wrong values or garbage. "%%" is
+// a literal percent sign, not a verb: it takes no value ("a %% at the end").
 func TestTranslationsKeepFormatVerbs(t *testing.T) {
-	verb := regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z]`)
+	verb := regexp.MustCompile(`%%|%[-+ #0-9.]*[a-zA-Z]`)
+	verbs := func(s string) []string {
+		var out []string
+		for _, v := range verb.FindAllString(s, -1) {
+			if v != "%%" {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
 	for lang, catalogue := range catalogs {
 		for key, translated := range catalogue {
-			want := verb.FindAllString(key, -1)
-			got := verb.FindAllString(translated, -1)
+			want := verbs(key)
+			got := verbs(translated)
 			if len(want) != len(got) {
 				t.Errorf("%s: %q has %v, translation has %v", lang, key, want, got)
 				continue

@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var version = "0.36.0"
+var version = "0.37.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -124,7 +124,7 @@ func run(args []string) error {
 	case "cdn":
 		return cmdCdn(parsed)
 	case "waf":
-		return cmdWaf(parsed)
+		return cmdWaf(parseArgsWithSwitches(args[1:], wafSwitches))
 	case "logs":
 		return cmdLogs(parsed)
 	case "init":
@@ -297,6 +297,25 @@ Usage:
                  block page — all 32 characters, or the first 12+ the panel shows;
                  last 30 days; prints every matched rule and a verdict; exit 1
                  when nothing matches)
+  cdnctl waf insights [--account <uuid>] [--format table|json]
+                (the panel's Repeated blocks card: the last 7 days' blocks grouped by
+                 rule, path and the field the rule matched, most first, with how many
+                 IP addresses, the newest block's Reference ID (REF) and whether an
+                 exception covers it already; counts only: no IPs, query strings or
+                 matched data)
+  cdnctl waf exempt <ref> [--account <uuid>] [--rule <id>] [--path <path>] [--prefix] [--field <field>] [--dry-run] [--format table|json]
+                (adds the WAF exception the panel's Exempt button prepares for that
+                 block: the rule it matched, only that exact path and, when the rule
+                 matched one request field, only that field. --rule picks the rule
+                 when it matched several, --path names another path, --prefix covers
+                 everything under it too, --field "" every field (--field= in Windows
+                 PowerShell 5.1, which drops an empty argument). The edges apply it
+                 within 1-2 minutes. --dry-run adds nothing: it prints the exception and
+                 how many blocks of the last 7 and 30 days it would apply to)
+  cdnctl waf exclusions list [--account <uuid>] [--format table|json]
+  cdnctl waf exclusions rm <id> [--account <uuid>] [--format table|json] --yes
+                (the account's WAF exceptions, at most 50; removing one makes its
+                 rule apply on that path again within 1-2 minutes)
   cdnctl logs status [--account <uuid>] [--format table|json]
   cdnctl logs list [--account <uuid>] [--day YYYY-MM-DD] [--format table|json]
   cdnctl logs pull [--account <uuid>] [--day YYYY-MM-DD] [--out <dir>]
@@ -324,6 +343,14 @@ All commands print JSON.
 }
 
 func parseArgs(args []string) parsedArgs {
+	return parseArgsWithSwitches(args, nil)
+}
+
+// parseArgsWithSwitches is parseArgs for a command whose switches must never take the
+// next word as their value: with parseArgs, `waf exempt --prefix 5c0f…` reads the
+// Reference ID as the value of --prefix, and `waf exclusions rm --yes 12` loses the id.
+// switches holds normalized keys (underscores); --switch=value still sets a value.
+func parseArgsWithSwitches(args []string, switches map[string]bool) parsedArgs {
 	out := parsedArgs{Options: map[string]string{}, Bools: map[string]bool{}, Multi: map[string][]string{}}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -337,7 +364,7 @@ func parseArgs(args []string) parsedArgs {
 			parts := strings.SplitN(key, "=", 2)
 			key = parts[0]
 			value = parts[1]
-		} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+		} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") && !switches[strings.ReplaceAll(key, "-", "_")] {
 			i++
 			value = args[i]
 		}
