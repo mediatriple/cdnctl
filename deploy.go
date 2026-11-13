@@ -187,6 +187,14 @@ func cmdDeploy(args parsedArgs) error {
 		return fmt.Errorf(T("%s not found. Run `cdnctl init`: it writes a template for the project types it knows (node, python, go, php, static). For a stack it does not recognise you need to write the Dockerfile yourself"), dockerfile)
 	}
 
+	// The add-ons section is read before anything reaches the API: one that
+	// cannot be read stops the deploy here, because skipping it quietly is the
+	// app starting without its database.
+	addons, err := readManifestAddons(dir)
+	if err != nil {
+		return err
+	}
+
 	// Karne kapısı: hatalı deploy zaten çalışmayan bir site üretir; agent'lar
 	// --skip-checks ile bilinçli geçebilir.
 	if !args.Bools["skip_checks"] {
@@ -213,6 +221,16 @@ func cmdDeploy(args parsedArgs) error {
 		if err := confirmOverwrite(account, appUUID, name); err != nil {
 			return err
 		}
+	}
+
+	// Add-ons this session cannot provide are cheaper to hear about now than
+	// after the build: a deploy-only token creates and updates the app and cannot
+	// enable anything for it. They are enabled later, once the app exists.
+	if len(addons) > 0 {
+		if err := refuseAddonsTheTokenCannotEnable(account, appUUID, addons); err != nil {
+			return err
+		}
+		fmt.Printf(T("   add-ons in cdnctl.yaml: %s\n"), addonNames(addons))
 	}
 
 	// The health check is settled here too, before the build: a question about
@@ -286,7 +304,16 @@ func cmdDeploy(args parsedArgs) error {
 
 	// Uygulama var mı? Varsa yeni tag'e çevir, yoksa oluştur + expose et.
 	fallbackDomain := ""
+	var queued map[string]any
 	if appUUID != "" {
+		// A declared add-on this app does not have yet is enabled before the new
+		// image goes out; one it has is left as it is. The platform restarts a
+		// running app when an add-on becomes active (with the image it runs, and
+		// the add-on's variables), so introducing an add-on here rolls the app
+		// once more than a plain deploy does.
+		if err := ensureDeclaredAddons(account, appUUID, addons, false); err != nil {
+			return err
+		}
 		fmt.Printf(T("→ pointing the existing app at the new image (%s:%s)\n"), image, tag)
 		patch := map[string]any{"image": image, "tag": tag}
 		if health.Type != "" {
@@ -295,17 +322,21 @@ func cmdDeploy(args parsedArgs) error {
 			health.addTo(patch)
 			health.announce()
 		}
-		if _, err := requestJSON(http.MethodPatch,
+		patched, err := requestJSON(http.MethodPatch,
 			fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID),
-			patch); err != nil {
+			patch)
+		if err != nil {
 			return err
+		}
+		// A refused update leaves the old image in place, and the deploy below
+		// would roll that out and report it live.
+		if reason, failed := apiFailure(patched); failed {
+			return errExitMessage(1, fmt.Sprintf(T("The new image was not applied: %s"), reason))
 		}
 		// PATCH calisan uygulamayi dondurur ama DURMUS olani baslatmaz (canlida
 		// olculdu) — rollout'u her durumda acikca tetikle.
 		fmt.Println(T("→ triggering rollout"))
-		if _, err := requestJSON(http.MethodPost,
-			fmt.Sprintf("accounts/%s/platform/container/apps/%s/deploy", account, appUUID),
-			map[string]any{}); err != nil {
+		if queued, err = startDeploy(account, appUUID); err != nil {
 			return err
 		}
 	} else {
@@ -343,54 +374,39 @@ func cmdDeploy(args parsedArgs) error {
 		if d := appDomain(exposeResp); d != "" {
 			fallbackDomain = d
 		}
+		// The add-ons the manifest declares come before the first pod: an app
+		// started without its database crashes on the first query, and enabling
+		// the add-on afterwards is the six-minute outage this order prevents.
+		if err := ensureDeclaredAddons(account, appUUID, addons, true); err != nil {
+			return err
+		}
 		// create app'i "stopped" bırakır: pod'u ancak deploy başlatır. (İlk canlı
 		// koşuda atlanmıştı — uygulama oluştu, expose oldu ve sonsuza dek "deploying"
 		// göründü çünkü hiç pod yoktu.)
 		fmt.Println(T("→ starting the first deploy"))
-		if _, err := requestJSON(http.MethodPost,
-			fmt.Sprintf("accounts/%s/platform/container/apps/%s/deploy", account, appUUID),
-			map[string]any{}); err != nil {
+		if queued, err = startDeploy(account, appUUID); err != nil {
 			return err
 		}
 	}
 
-	// Çalışır duruma gelmesini bekle ve adresi söyle.
+	// Çalışır duruma gelmesini bekle ve adresi söyle. fallbackDomain: "running"a
+	// ilk gecen yoklamada show yaniti domaini henuz tasimayabiliyor (temiz kabul
+	// kosusunda URL bos basildi) — expose yanitindan aldigimiz yedek.
+	//
+	// The wait and the report are the ones `cdnctl container apps deploy` uses
+	// (rollout.go). A timeout or a failed revision is where someone most needs an
+	// answer, so the report names the state and the reason here rather than
+	// sending the person to another command for a payload they then have to read.
 	fmt.Println(T("→ waiting for the app to come up"))
-	for i := 0; i < 30; i++ {
-		show, err := requestJSON(http.MethodGet,
-			fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID), nil)
-		if err != nil {
-			return err
-		}
-		status := findString(show, "runtime_status")
-		domain := appDomain(show)
-		if domain == "" {
-			// "running"a ilk gecen yoklamada show yaniti domaini henuz tasimayabiliyor
-			// (temiz kabul kosusunda URL bos basildi) — expose yanitindan aldigimiz yedek.
-			domain = fallbackDomain
-		}
-		if status == "running" && domain != "" {
-			fmt.Printf(T("\n✓ LIVE: https://%s\n"), domain)
-			return nil
-		}
-		if status == "running" {
-			fmt.Println(T("\n✓ LIVE — for the address: cdnctl container apps show --app ") + appUUID)
-			return nil
-		}
-		time.Sleep(10 * time.Second)
+	outcome, err := waitForRollout(account, appUUID, queued, defaultDeployTimeout, fallbackDomain)
+	if err != nil {
+		return err
 	}
-	// Timing out is where someone most needs an answer, and "not running yet"
-	// reads as patience when the truth is often a failed probe or a container
-	// that exited. Show the state and the likely reason here rather than sending
-	// the person to another command for a payload they then have to read.
-	fmt.Println()
-	if show, err := requestJSON(http.MethodGet,
-		fmt.Sprintf("accounts/%s/platform/container/apps/%s", account, appUUID), nil); err == nil {
-		printAppSummary(show)
-	} else {
-		fmt.Println(T("The app is not running yet — follow its state: cdnctl container apps show --app ") + appUUID)
+	reportRollout(outcome, appUUID)
+	if !outcome.succeeded() {
+		return errExit(1)
 	}
-	return errExit(1)
+	return nil
 }
 
 func requiredAccount(args parsedArgs) string {

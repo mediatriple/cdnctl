@@ -112,6 +112,7 @@ func TestDeployHealthcheckWithoutRouteRefusesWithoutATerminal(t *testing.T) {
 }
 
 func TestDeployHealthcheckWithoutRouteAsks(t *testing.T) {
+	englishMessages(t) // the prompt is looked for in English
 	dir := writeFixture(t, map[string]string{"server.js": "app.listen(process.env.PORT)"})
 
 	var out bytes.Buffer

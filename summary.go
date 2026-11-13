@@ -67,6 +67,13 @@ func appState(app map[string]any) string {
 	if raw, ok := app["runtime_status"].(string); ok && raw != "" {
 		return raw
 	}
+	// The app's own status is the panel's verdict after its last look at the
+	// cluster. The revision list comes next only for payloads without it: on a
+	// single app it is every revision, oldest first, so its first entry is the
+	// state of the first deploy the app ever had.
+	if status, ok := app["status"].(string); ok && status != "" {
+		return status
+	}
 	if revisions, ok := app["revisions"].([]any); ok && len(revisions) > 0 {
 		if latest, ok := revisions[0].(map[string]any); ok {
 			if status, ok := latest["status"].(string); ok && status != "" {

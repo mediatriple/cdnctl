@@ -456,6 +456,12 @@ yourself:
   this updates it in place.
 - ` + "`cdnctl container apps show --app <id> --json`" + ` — current state and the live
   URL (the <id> is the ` + "`app:`" + ` value in cdnctl.yaml).
+- Managed add-ons (postgres, redis, mysql, nats): declare what the app needs under
+  ` + "`addons:`" + ` in cdnctl.yaml (e.g. ` + "`postgres: true`" + `, indented below it) and
+  ` + "`cdnctl deploy`" + ` enables it BEFORE the first deploy; the app then reads
+  DATABASE_URL / REDIS_URL / NATS_URL from its environment. Nothing is removed for
+  being absent from the file. A deploy-only token cannot enable add-ons: that one
+  deploy needs a ` + "`cdnctl login`" + ` session.
 - ` + "`cdnctl check --json`" + ` — local pre-deploy report card (localhost binds, secrets
   in code, SQLite-in-container, missing healthcheck). Fix errors before
   deploying; exit code 1 means errors exist.
@@ -574,7 +580,183 @@ port: %d
 deploy:
   method: %s   # source (tarball -> platform build) | git | compose
 `, project.Name, project.Language, port, health, method)
+	manifest += addonManifestHint(detectAddonNeeds(dir))
 	return true, os.WriteFile(path, []byte(manifest), 0o644)
+}
+
+// ---------- add-on needs ----------
+
+// addonNeed is a service the project's own dependency list says it talks to.
+type addonNeed struct {
+	Type     string // postgres | mysql | redis | nats
+	Evidence string // "pg in package.json"
+}
+
+// addonEnvHint names the variable an app reads for each add-on with its default
+// prefix.
+var addonEnvHint = map[string]string{
+	"postgres": "DATABASE_URL",
+	"mysql":    "DATABASE_URL",
+	"redis":    "REDIS_URL",
+	"nats":     "NATS_URL",
+}
+
+// Client libraries that exist to talk to one service. An ORM is left out on
+// purpose: it says a database is used, not which one.
+var addonJSONSignals = map[string]map[string]string{
+	"package.json": {
+		"pg": "postgres", "pg-promise": "postgres", "pg-pool": "postgres", "postgres": "postgres",
+		"mysql": "mysql", "mysql2": "mysql",
+		"redis": "redis", "ioredis": "redis",
+		"nats": "nats",
+	},
+	"composer.json": {
+		"ext-pdo_pgsql": "postgres", "ext-pgsql": "postgres",
+		"ext-pdo_mysql": "mysql", "ext-mysqli": "mysql",
+		"predis/predis": "redis", "ext-redis": "redis",
+	},
+}
+
+var addonPythonSignals = map[string]string{
+	"psycopg2": "postgres", "psycopg2-binary": "postgres", "psycopg": "postgres", "asyncpg": "postgres", "pg8000": "postgres",
+	"pymysql": "mysql", "mysqlclient": "mysql", "mysql-connector-python": "mysql", "aiomysql": "mysql",
+	"redis": "redis", "aioredis": "redis",
+	"nats-py": "nats",
+}
+
+var addonGoSignals = map[string]string{
+	"github.com/lib/pq": "postgres", "github.com/jackc/pgx": "postgres",
+	"github.com/go-sql-driver/mysql": "mysql",
+	"github.com/redis/go-redis":      "redis", "github.com/go-redis/redis": "redis", "github.com/gomodule/redigo": "redis",
+	"github.com/nats-io/nats.go": "nats",
+}
+
+// A requirement at the start of a line, bare or quoted, as requirements.txt and
+// pyproject.toml write it: "redis", "redis>=5", "redis[hiredis]==5.0", redis = "^5".
+var rePythonRequirement = regexp.MustCompile(`(?m)^\s*["']?([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(?:[=<>~!,;@"']|$)`)
+
+// detectAddonNeeds reads the dependency manifests for database, cache and
+// messaging clients. It is a hint for a person or an agent to act on, never a
+// reason to create a billed add-on by itself: an app may just as well point the
+// same client at a database hosted elsewhere.
+func detectAddonNeeds(dir string) []addonNeed {
+	found := map[string]string{}
+	note := func(kind, evidence string) {
+		if _, seen := found[kind]; !seen {
+			found[kind] = evidence
+		}
+	}
+
+	// A fixed order: the first evidence found for a type is the one reported,
+	// and it must be the same on every run.
+	for _, file := range []string{"package.json", "composer.json"} {
+		signals := addonJSONSignals[file]
+		raw, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			continue
+		}
+		var manifest struct {
+			Dependencies map[string]any `json:"dependencies"`
+			Require      map[string]any `json:"require"`
+		}
+		if json.Unmarshal(raw, &manifest) != nil {
+			continue
+		}
+		names := []string{}
+		for name := range manifest.Dependencies {
+			names = append(names, name)
+		}
+		for name := range manifest.Require {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if kind, ok := signals[strings.ToLower(name)]; ok {
+				note(kind, name+" in "+file)
+			}
+		}
+	}
+	for _, file := range []string{"requirements.txt", "pyproject.toml"} {
+		raw, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			continue
+		}
+		for _, match := range rePythonRequirement.FindAllStringSubmatch(string(raw), -1) {
+			name := strings.ToLower(strings.ReplaceAll(match[1], "_", "-"))
+			if kind, ok := addonPythonSignals[name]; ok {
+				note(kind, name+" in "+file)
+			}
+		}
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
+		modules := make([]string, 0, len(addonGoSignals))
+		for module := range addonGoSignals {
+			modules = append(modules, module)
+		}
+		sort.Strings(modules)
+		for _, module := range modules {
+			if strings.Contains(string(raw), module) {
+				note(addonGoSignals[module], module+" in go.mod")
+			}
+		}
+	}
+
+	needs := []addonNeed{}
+	for _, kind := range []string{"postgres", "mysql", "redis", "nats"} {
+		if evidence, ok := found[kind]; ok {
+			needs = append(needs, addonNeed{Type: kind, Evidence: evidence})
+		}
+	}
+	return needs
+}
+
+// addonManifestHint is the commented block init adds to a new cdnctl.yaml. It
+// stays commented because an add-on is billed and the app may use a database
+// hosted elsewhere: the same rule as the health path above, which is written
+// active only when the code answers it.
+func addonManifestHint(needs []addonNeed) string {
+	if len(needs) == 0 {
+		return ""
+	}
+	evidence := make([]string, 0, len(needs))
+	for _, need := range needs {
+		evidence = append(evidence, need.Evidence)
+	}
+	hint := "# Managed add-ons (" + strings.Join(evidence, "; ") + "). Uncomment the ones the platform\n" +
+		"# should provide: `cdnctl deploy` enables them before the first deploy. For a service\n" +
+		"# hosted elsewhere write false instead of true.\n" +
+		"# addons:\n"
+	for _, need := range needs {
+		hint += fmt.Sprintf("#   %s: true   # the app receives %s\n", need.Type, addonEnvHint[need.Type])
+	}
+	return hint
+}
+
+// undeclaredAddonNeeds is what the dependencies point at and cdnctl.yaml does not
+// mention, as one phrase: "postgres (pg in package.json), redis (ioredis in package.json)".
+// An add-on the file declares off (`postgres: false`) is mentioned: the app uses
+// a database hosted elsewhere, and saying so ends the suggestion.
+func undeclaredAddonNeeds(dir string) ([]string, string) {
+	declared := map[string]bool{}
+	if raw, err := os.ReadFile(filepath.Join(dir, "cdnctl.yaml")); err == nil {
+		if specs, off, err := parseManifestAddonSection(string(raw)); err == nil {
+			for _, spec := range specs {
+				declared[spec.Type] = true
+			}
+			for _, name := range off {
+				declared[name] = true
+			}
+		}
+	}
+	kinds, phrases := []string{}, []string{}
+	for _, need := range detectAddonNeeds(dir) {
+		if declared[need.Type] {
+			continue
+		}
+		kinds = append(kinds, need.Type)
+		phrases = append(phrases, need.Type+" ("+need.Evidence+")")
+	}
+	return kinds, strings.Join(phrases, ", ")
 }
 
 // writeDockerfile generates the container recipe when the project has none.
@@ -1624,6 +1806,15 @@ func cmdInit(args parsedArgs) error {
 	}
 	report.Findings = runChecks(dir)
 	report.Decisions = openDecisions(report.Project, report.Entitlement, method)
+	// A database or cache client among the dependencies: say that the platform
+	// can provide it and where to declare it. Like the package, this is not a
+	// flag: the answer is a line in cdnctl.yaml, written by whoever knows whether
+	// the app's database lives here or elsewhere.
+	if kinds, phrase := undeclaredAddonNeeds(dir); len(kinds) > 0 {
+		text := fmt.Sprintf(T("This project uses %s. Declare it under `addons:` in cdnctl.yaml and `cdnctl deploy` enables it before the first deploy, so the app never starts without it."), phrase)
+		report.Decisions = append(report.Decisions, decision{ID: "addons", Question: text, Options: kinds})
+		report.Notes = append(report.Notes, text)
+	}
 
 	if !dryRun {
 		if wrote, err := writeManifest(dir, report.Project, method); err != nil {

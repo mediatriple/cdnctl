@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var version = "0.37.0"
+var version = "0.38.0"
 
 // installChannel records how this binary was distributed. Direct downloads and
 // `go install` builds keep the default and may self-update; builds packaged for
@@ -201,7 +201,15 @@ Usage:
       secrets vs env: use --secret for sensitive values (API keys, tokens). A key
       lives in EITHER env or secrets, never both (last write wins); a secret of the
       same name takes precedence and the duplicate env key is dropped automatically.
-  cdnctl container apps deploy --account <uuid> --app <app_uuid>
+  cdnctl container apps deploy --account <uuid> --app <app_uuid> [--no-wait] [--timeout 300] [--json]
+                (waits for the revision it created and reports how the deploy ended:
+                 state, revision and, when it did not come up, the reason and where the
+                 logs are; exit 1 on a failed revision, a timeout or a refused deploy,
+                 exit 0 when the app is scaled to 0 replicas. A terminal gets text;
+                 --json, or a pipe, gets ONE JSON object, printed after the wait.
+                 --no-wait prints the API's "queued" answer and returns at once, which
+                 is what this command did before 0.38.0; use it when a script waits
+                 with apps wait itself)
   cdnctl container apps expose --account <uuid> --app <app_uuid>
   cdnctl container apps restart --account <uuid> --app <app_uuid>
   cdnctl container apps scale --account <uuid> --app <app_uuid> --replicas 0
@@ -263,6 +271,11 @@ Usage:
                  ödeme tarayıcıda biter, init yeniden çalıştırılınca kaldığı yerden sürer)
   cdnctl deploy [--dir .] [--account <uuid>] [--name <app>] [--dockerfile Dockerfile] [--app <app_uuid>] [--skip-checks] [--healthcheck /health | --no-healthcheck | --healthcheck-type http|tcp|none]
                 (new app with no /health route: asks; without a terminal, one of the health flags is required)
+                (add-ons declared under "addons:" in cdnctl.yaml — postgres, redis, mysql,
+                 nats, each with optional env_prefix, plan, storage_mb (mysql: url_scheme) —
+                 are enabled and ready BEFORE a new app's first deploy; on an existing app
+                 a declared add-on that is missing is enabled, one that exists is left as
+                 it is, and nothing is ever disabled or deleted for being absent from the file)
                 (kaynagi tar'lar, yukler, platformda Kaniko ile build eder, uygulamayi
                  yeni imaja cevirir — yoksa olusturur+expose eder; git/registry GEREKMEZ)
   cdnctl deploy-token create [--account <uuid>] [--name "agent"]   (duz metin BIR KEZ gosterilir)
@@ -1599,7 +1612,7 @@ func cmdContainerApps(action string, args parsedArgs) error {
 	case "update":
 		return cmdContainerAppUpdate(base, args)
 	case "deploy":
-		return printRequest(http.MethodPost, base+"/deploy", map[string]any{})
+		return cmdAppsDeploy(account, app, args)
 	case "expose":
 		return printRequest(http.MethodPost, base+"/expose", map[string]any{})
 	case "restart":

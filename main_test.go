@@ -358,9 +358,28 @@ func TestUsageContainsNewCommands(t *testing.T) {
 	}
 }
 
-func TestVersionIs0370(t *testing.T) {
-	if version != "0.37.0" {
-		t.Fatalf("expected version 0.37.0, got %s", version)
+// The usage banner is the contract the help centre is checked against
+// (CdnctlDocumentedCommandsContractTest): a flag we document has to be on the
+// command's own line here.
+func TestUsageDocumentsTheDeployWaitAndManifestAddons(t *testing.T) {
+	text := usageText(t)
+	for _, want := range []string{
+		"cdnctl container apps deploy --account <uuid> --app <app_uuid> [--no-wait] [--timeout 300] [--json]",
+		"exit 1 on a failed revision, a timeout or a refused deploy",
+		"exit 0 when the app is scaled to 0 replicas",
+		"ONE JSON object",
+		`add-ons declared under "addons:" in cdnctl.yaml`,
+		"nothing is ever disabled or deleted",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("usage text missing %q", want)
+		}
+	}
+}
+
+func TestVersionIs0380(t *testing.T) {
+	if version != "0.38.0" {
+		t.Fatalf("expected version 0.38.0, got %s", version)
 	}
 }
 

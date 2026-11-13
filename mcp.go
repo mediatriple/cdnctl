@@ -85,7 +85,7 @@ var mcpTools = []mcpTool{
 	},
 	{
 		Name:        "deploy",
-		Description: "Deploy the project from source: archive, upload, build on the platform (Kaniko sandbox), point the app at the new image (creating and exposing it if needed) and wait until it runs. No git or registry required. Long-running (1-5 minutes).",
+		Description: "Deploy the project from source: archive, upload, build on the platform (Kaniko sandbox), point the app at the new image (creating and exposing it if needed) and wait until the new revision runs. Managed add-ons declared under \"addons:\" in cdnctl.yaml (postgres, redis, mysql, nats) are enabled and ready before a new app's first deploy; a deploy-only token cannot enable them. No git or registry required. Long-running (1-5 minutes).",
 		InputSchema: objSchema(map[string]any{
 			"dir":         map[string]any{"type": "string", "description": "Project directory (default: current)"},
 			"account":     map[string]any{"type": "string", "description": "Account UUID (default: the saved account)"},
