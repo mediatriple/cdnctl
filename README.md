@@ -92,7 +92,7 @@ Purge the CDN cache:
 
 ```bash
 cdnctl purge --account <account_uuid> --path /assets/app.css
-cdnctl purge all --account <account_uuid>
+cdnctl purge all --account <account_uuid> --yes
 ```
 
 Deploy a container app from a Docker Compose file:
@@ -153,7 +153,7 @@ Other variables: `CDNCTL_BASE_URL` (mirror for self-update), `CDNCTL_BIN_DIR` (i
     CDN_ACCESS_TOKEN: ${{ secrets.CDN_ACCESS_TOKEN }}
   run: |
     go install github.com/mediatriple/cdnctl@latest
-    cdnctl purge all --account ${{ vars.CDN_ACCOUNT_UUID }}
+    cdnctl purge all --account ${{ vars.CDN_ACCOUNT_UUID }} --yes
 ```
 
 ---
